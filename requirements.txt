@@ -1,4 +1,7 @@
-flask
-flask_sqlalchemy
-requests
-gunicorn
+Flask==3.0.0
+Flask-SQLAlchemy==3.1.1
+gunicorn==21.2.0
+requests==2.31.0
+python-dotenv==1.0.1
+werkzeug==3.0.1
+openai==1.51.0
