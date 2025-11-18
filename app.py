@@ -1,460 +1,570 @@
 import os
-import time
 import requests
-from flask import Flask, request, jsonify, render_template, redirect, session, flash
-from flask_sqlalchemy import SQLAlchemy
+from flask import (
+    Flask, request, jsonify, render_template, redirect,
+    url_for, session, flash
+)
+from werkzeug.utils import secure_filename
 
 from config import Config
 from models import db, Category, Service, Order, OrderStatus, Message, AIReview
 from ai_service import analyze_audio_file
 
+
+# ------------------------------------------------------------
+#  APP INITIALIZATION
+# ------------------------------------------------------------
+
 app = Flask(__name__)
 app.config.from_object(Config)
 db.init_app(app)
 
+with app.app_context():
+    db.create_all()
 
-# =============================
-#   HELPERS
-# =============================
+
+# ------------------------------------------------------------
+#  HELPERS
+# ------------------------------------------------------------
 
 def send_user_message(chat_id, text, reply_markup=None):
-    data = {
-        "chat_id": chat_id,
-        "text": text
-    }
-    if reply_markup:
-        data["reply_markup"] = reply_markup
+    token = app.config["TELEGRAM_BOT_TOKEN"]
+    if not token: return
 
-    requests.post(
-        f"https://api.telegram.org/bot{Config.TELEGRAM_BOT_TOKEN}/sendMessage",
-        json=data
-    )
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+
+    requests.post(url, json=payload)
 
 
 def send_master_message(chat_id, text, reply_markup=None):
-    data = {
-        "chat_id": chat_id,
-        "text": text
-    }
+    token = app.config["TELEGRAM_MASTER_BOT_TOKEN"]
+    if not token: return
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+
     if reply_markup:
-        data["reply_markup"] = reply_markup
+        payload["reply_markup"] = reply_markup
 
-    requests.post(
-        f"https://api.telegram.org/bot{Config.TELEGRAM_MASTER_BOT_TOKEN}/sendMessage",
-        json=data
-    )
+    requests.post(url, json=payload)
 
 
-# =============================
-#   HOME REDIRECT
-# =============================
-
-@app.route("/")
-def home():
-    return redirect("/admin/login")
+def admin_notify(text):
+    admin_id = app.config["TELEGRAM_ADMIN_CHAT_ID"]
+    if admin_id:
+        send_user_message(admin_id, f"📢 Admin xabari:\n{text}")
 
 
-# =============================
-#   ADMIN LOGIN
-# =============================
+# ------------------------------------------------------------
+# AUTH (ADMIN PANEL)
+# ------------------------------------------------------------
+
+def login_required(fn):
+    def wrap(*args, **kwargs):
+        if not session.get("admin_logged_in"):
+            return redirect(url_for("admin_login"))
+        return fn(*args, **kwargs)
+    wrap.__name__ = fn.__name__
+    return wrap
+
 
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     if request.method == "POST":
-        if request.form["username"] == Config.ADMIN_USERNAME and \
-           request.form["password"] == Config.ADMIN_PASSWORD:
-            session["admin"] = True
+        name = request.form["username"]
+        pwd = request.form["password"]
+
+        if name == Config.ADMIN_USERNAME and pwd == Config.ADMIN_PASSWORD:
+            session["admin_logged_in"] = True
             return redirect("/admin/dashboard")
-        flash("Noto‘g‘ri login yoki parol", "danger")
+
+        flash("❌ Login yoki parol noto‘g‘ri!", "danger")
+
     return render_template("login.html")
 
 
 @app.route("/admin/logout")
-def logout():
-    session.pop("admin", None)
-    return redirect("/admin/login")
+def admin_logout():
+    session.clear()
+    return redirect(url_for("admin_login"))
 
 
-# =============================
-#   ADMIN PAGES
-# =============================
+# ------------------------------------------------------------
+# ADMIN PANEL
+# ------------------------------------------------------------
+
+@app.route("/")
+def home():
+    return redirect("/admin/dashboard")
+
 
 @app.route("/admin/dashboard")
-def dashboard():
-    if "admin" not in session:
-        return redirect("/admin/login")
-    orders = Order.query.order_by(Order.id.desc()).limit(10).all()
-    return render_template("dashboard.html", orders=orders)
+@login_required
+def admin_dashboard():
+    orders = Order.query.order_by(Order.created_at.desc()).limit(20).all()
+    return render_template("dashboard.html", orders=orders, OrderStatus=OrderStatus)
 
 
-@app.route("/admin/categories", methods=["GET"])
-def categories_page():
-    if "admin" not in session:
-        return redirect("/admin/login")
-    cats = Category.query.all()
-    return render_template("categories.html", categories=cats)
+@app.route("/admin/categories")
+@login_required
+def admin_categories():
+    categories = Category.query.all()
+    return render_template("categories.html", categories=categories)
 
 
-@app.post("/admin/categories/add")
-def add_category():
+@app.route("/admin/categories/add", methods=["POST"])
+@login_required
+def admin_add_category():
     name = request.form["name"]
-    icon = request.form.get("icon", "")
+    icon = request.form.get("icon")
 
-    c = Category(name=name, icon=icon)
-    db.session.add(c)
+    db.session.add(Category(name=name, icon=icon))
     db.session.commit()
+
     return redirect("/admin/categories")
 
 
-@app.post("/admin/categories/<int:id>/delete")
-def delete_category(id):
-    Category.query.filter_by(id=id).delete()
+@app.route("/admin/categories/<int:id>/delete", methods=["POST"])
+@login_required
+def admin_delete_category(id):
+    cat = Category.query.get(id)
+    db.session.delete(cat)
     db.session.commit()
     return redirect("/admin/categories")
 
 
 @app.route("/admin/services")
-def services_page():
-    if "admin" not in session:
-        return redirect("/admin/login")
-    return render_template(
-        "services.html",
-        services=Service.query.all(),
-        categories=Category.query.all()
-    )
+@login_required
+def admin_services():
+    services = Service.query.all()
+    categories = Category.query.all()
+    return render_template("services.html", services=services, categories=categories)
 
 
-@app.post("/admin/services/add")
-def add_service():
-    s = Service(
+@app.route("/admin/services/add", methods=["POST"])
+@login_required
+def admin_add_service():
+    srv = Service(
         name=request.form["name"],
-        price=request.form.get("price"),
+        price=float(request.form.get("price") or 0),
         description=request.form.get("description"),
-        category_id=request.form["category_id"]
+        category_id=int(request.form["category_id"])
     )
-    db.session.add(s)
+    db.session.add(srv)
     db.session.commit()
     return redirect("/admin/services")
 
 
-@app.post("/admin/services/<int:id>/delete")
-def delete_service(id):
-    Service.query.filter_by(id=id).delete()
+@app.route("/admin/services/<int:id>/delete", methods=["POST"])
+@login_required
+def admin_delete_service(id):
+    srv = Service.query.get(id)
+    db.session.delete(srv)
     db.session.commit()
     return redirect("/admin/services")
 
 
 @app.route("/admin/orders")
-def orders_page():
-    if "admin" not in session:
-        return redirect("/admin/login")
-
+@login_required
+def admin_orders():
     status = request.args.get("status")
-    if status:
-        orders = Order.query.filter_by(status=status).all()
-    else:
-        orders = Order.query.order_by(Order.id.desc()).all()
+    query = Order.query
 
-    return render_template("orders.html", orders=orders)
+    if status:
+        query = query.filter_by(status=OrderStatus(status))
+
+    orders = query.order_by(Order.created_at.desc()).all()
+    return render_template("orders.html", orders=orders, OrderStatus=OrderStatus)
 
 
 @app.route("/admin/orders/<int:id>", methods=["GET", "POST"])
-def order_details(id):
-    if "admin" not in session:
-        return redirect("/admin/login")
-
+@login_required
+def admin_order_detail(id):
     order = Order.query.get(id)
 
     if request.method == "POST":
         action = request.form["action"]
 
-        if action == "status":
-            order.status = OrderStatus(request.form["status"])
-            db.session.commit()
-
+        # ADMIN → FOYDALANUVCHI XABAR
         if action == "send_message":
-            m = Message(
-                order_id=id,
-                text=request.form["text"],
-                from_admin=True
+            msg = Message(
+                order_id=order.id,
+                from_admin=True,
+                text=request.form["text"]
             )
-            db.session.add(m)
+            db.session.add(msg)
             db.session.commit()
 
-            # To user
-            send_user_message(order.user_chat_id, "Admin: " + request.form["text"])
+            send_user_message(order.chat_id, f"👨‍💼 Admin:\n{msg.text}")
+            return redirect(f"/admin/orders/{order.id}")
 
-        return redirect(f"/admin/orders/{id}")
+        # STATUS O‘ZGARTIRISH
+        if action == "status":
+            new_status = request.form["status"]
+            order.status = OrderStatus(new_status)
+            db.session.commit()
+
+            admin_notify(f"Buyurtma #{order.id} yangi status: {new_status}")
+
+            return redirect(f"/admin/orders/{order.id}")
+
+    messages = Message.query.filter_by(order_id=id).order_by(Message.created_at).all()
+
+    ai_data = AIReview.query.filter_by(order_id=id).all()
 
     return render_template(
         "order_detail.html",
         order=order,
-        messages=Message.query.filter_by(order_id=id).all(),
-        ai_data=AIReview.query.filter_by(order_id=id).order_by(AIReview.id.desc()).all(),
+        messages=messages,
+        ai_data=ai_data,
         OrderStatus=OrderStatus
     )
 
 
-# =============================
-#   UPLOAD AUDIO (ADMIN)
-# =============================
+# ------------------------------------------------------------
+#  ANALYTIKA PANELI
+# ------------------------------------------------------------
 
-@app.post("/admin/upload_audio/<int:order_id>/<audio_type>")
-def upload_audio(order_id, audio_type):
-    file = request.files["audio"]
-    filename = f"{audio_type}_{order_id}_{int(time.time())}.ogg"
-    path = os.path.join(Config.UPLOAD_FOLDER, filename)
-    file.save(path)
-
-    analyze_audio_file(order_id, path, audio_type, db, AIReview)
-
-    flash("AI tahlil bajarildi!", "success")
-    return redirect(f"/admin/orders/{order_id}")
-
-
-# =============================
-#   AI Tahlillar
-# =============================
+from sqlalchemy import func
 
 @app.route("/admin/analytics")
-def analytics():
-    if "admin" not in session:
-        return redirect("/admin/login")
-
+@login_required
+def admin_analytics():
     total_orders = Order.query.count()
-    done_orders = Order.query.filter_by(status=OrderStatus.DONE).count()
+    done_orders = Order.query.filter(Order.status == OrderStatus.DONE).count()
 
-    revenue = sum([o.service.price for o in Order.query.filter_by(status=OrderStatus.DONE).all() if o.service])
-    profit = revenue * (100 - Config.MASTER_SHARE_PERCENT) / 100
+    # Daromad
+    revenue = (
+        db.session.query(func.sum(Service.price))
+        .join(Order, Order.service_id == Service.id)
+        .filter(Order.status.in_([OrderStatus.DONE, OrderStatus.PAYMENT_PENDING]))
+        .scalar() or 0
+    )
 
-    from sqlalchemy import func
-    top_services = db.session.query(Service.name, func.count(Order.id))\
-        .join(Order, Order.service_id == Service.id)\
-        .group_by(Service.name)\
-        .order_by(func.count(Order.id).desc())\
-        .limit(5).all()
+    master_percent = Config.MASTER_SHARE_PERCENT
+    master_cost = revenue * (master_percent / 100)
+    profit = revenue - master_cost
+
+    top_services = (
+        db.session.query(Service.name, func.count(Order.id))
+        .join(Order)
+        .group_by(Service.id)
+        .order_by(func.count(Order.id).desc())
+        .limit(5)
+        .all()
+    )
 
     return render_template(
         "analytics.html",
         total_orders=total_orders,
         done_orders=done_orders,
-        revenue=revenue,
+        revenue=int(revenue),
+        master_cost=int(master_cost),
         profit=int(profit),
         top_services=top_services
     )
 
 
-@app.route("/admin/ai")
-def ai_page():
-    return render_template(
-        "ai_analysis.html",
-        ai_list=AIReview.query.order_by(AIReview.id.desc()).all()
-    )
+# ------------------------------------------------------------
+#  AI AUDIO YUKLASH (FOYDALANUVCHI + USTA)
+# ------------------------------------------------------------
+
+@app.route("/admin/upload_audio/<int:order_id>/<string:user_type>", methods=["POST"])
+@login_required
+def upload_audio(order_id, user_type):
+    if "audio" not in request.files:
+        flash("Audio topilmadi!", "danger")
+        return redirect(f"/admin/orders/{order_id}")
+
+    file = request.files["audio"]
+    filename = secure_filename(file.filename)
+    save_path = os.path.join(Config.UPLOAD_FOLDER, filename)
+    file.save(save_path)
+
+    # AI orqali tahlil
+    ai_review = analyze_audio_file(order_id, save_path, user_type, db, AIReview)
+
+    flash("AI tahlili tayyor!", "success")
+    return redirect(f"/admin/orders/{order_id}")
 
 
-# =============================
-#   TELEGRAM — USER BOT
-# =============================
+# ------------------------------------------------------------
+# BOT WEBHOOK — CLIENT BOT
+# ------------------------------------------------------------
 
-@app.post("/telegram/user_webhook")
+@app.route("/telegram/user_webhook", methods=["POST"])
 def user_webhook():
-    update = request.json
+    update = request.get_json()
 
-    # No message
     if not update:
         return jsonify({"ok": True})
 
-    # Callback
-    if "callback_query" in update:
-        cb = update["callback_query"]
-        chat_id = cb["from"]["id"]
-        data = cb["data"]
-
-        # Category select
-        if data.startswith("cat_"):
-            cat_id = int(data.split("_")[1])
-            services = Service.query.filter_by(category_id=cat_id).all()
-
-            keyboard = [
-                [{"text": s.name, "callback_data": f"serv_{s.id}"}]
-                for s in services
-            ]
-
-            send_user_message(
-                chat_id,
-                "Xizmatni tanlang:",
-                {"inline_keyboard": keyboard}
-            )
-
-        # Service selected
-        if data.startswith("serv_"):
-            serv_id = int(data.split("_")[1])
-            serv = Service.query.get(serv_id)
-
-            new = Order(
-                service_id=serv_id,
-                category_id=serv.category_id,
-                status=OrderStatus.NEW,
-                user_chat_id=chat_id
-            )
-            db.session.add(new)
-            db.session.commit()
-
-            send_user_message(chat_id, "📞 Telefon raqamingizni yuboring.")
-        return jsonify({"ok": True})
-
-    # Messages
+    # MESSAGE HANDLER
     if "message" in update:
         msg = update["message"]
         chat_id = msg["chat"]["id"]
-
-        # ========================
-        #  VOICE = AI ANALYZE
-        # ========================
-        if "voice" in msg:
-
-            file_id = msg["voice"]["file_id"]
-
-            file_info = requests.get(
-                f"https://api.telegram.org/bot{Config.TELEGRAM_BOT_TOKEN}/getFile?file_id={file_id}"
-            ).json()
-
-            file_path = file_info["result"]["file_path"]
-            file_url = f"https://api.telegram.org/file/bot{Config.TELEGRAM_BOT_TOKEN}/{file_path}"
-
-            audio_data = requests.get(file_url).content
-
-            filename = f"voice_{chat_id}_{int(time.time())}.ogg"
-            save_path = os.path.join(Config.UPLOAD_FOLDER, filename)
-
-            with open(save_path, "wb") as f:
-                f.write(audio_data)
-
-            order = Order.query.filter_by(user_chat_id=chat_id).order_by(Order.id.desc()).first()
-
-            analyze_audio_file(order.id, save_path, "client", db, AIReview)
-
-            send_user_message(chat_id, "🎧 Ovoz qabul qilindi!\nAI tahlil qildi.")
-            return jsonify({"ok": True})
-
-        # Text messages
+        user_id = msg["from"]["id"]
         text = msg.get("text")
+        contact = msg.get("contact")
+        location = msg.get("location")
 
-        order = Order.query.filter_by(user_chat_id=chat_id).order_by(Order.id.desc()).first()
+        # Get/create order
+        order = Order.query.filter_by(
+            user_id=str(user_id),
+            chat_id=str(chat_id)
+        ).order_by(Order.id.desc()).first()
 
-        if order and not order.phone:
-            order.phone = text
+        if not order:
+            order = Order(
+                user_id=str(user_id),
+                chat_id=str(chat_id),
+                step="category",
+                status=OrderStatus.NEW
+            )
+            db.session.add(order)
             db.session.commit()
-            send_user_message(chat_id, "📍 Lokatsiyani yuboring.")
+
+        # START
+        if text == "/start":
+            order.step = "category"
+            order.status = OrderStatus.NEW
+            db.session.commit()
+
+            categories = Category.query.all()
+            kb = {"inline_keyboard": [
+                [{"text": f"{c.icon or ''} {c.name}", "callback_data": f"cat_{c.id}"}]
+                for c in categories
+            ]}
+
+            send_user_message(chat_id, "Xizmat turini tanlang:", kb)
             return jsonify({"ok": True})
 
-        if order and not order.location_lat and "location" in msg:
-            order.location_lat = msg["location"]["latitude"]
-            order.location_lng = msg["location"]["longitude"]
+        # CONTACT
+        if order.step == "phone":
+            if contact:
+                order.phone = contact["phone_number"]
+            elif text:
+                order.phone = text
+
+            order.step = "location"
             db.session.commit()
-            send_user_message(chat_id, "✍️ Izoh yozing.")
+
+            kb = {
+                "keyboard": [[{"text": "📍 Lokatsiyani ulashish", "request_location": True}]],
+                "resize_keyboard": True
+            }
+            send_user_message(chat_id, "Lokatsiyani yuboring:", kb)
             return jsonify({"ok": True})
 
-        if order and not order.comment:
-            order.comment = text
+        # LOCATION
+        if order.step == "location":
+            if location:
+                order.location_lat = location["latitude"]
+                order.location_lng = location["longitude"]
+            else:
+                order.address_text = text
+
+            order.step = "comment"
             db.session.commit()
+
             send_user_message(
                 chat_id,
-                "💳 To‘lov turini tanlang:",
-                {
-                    "inline_keyboard": [
-                        [{"text": "Click", "callback_data": "pay_click"}],
-                        [{"text": "Payme", "callback_data": "pay_payme"}]
-                    ]
-                }
+                "Ustaga izoh qoldiring:",
+                {"remove_keyboard": True}
             )
             return jsonify({"ok": True})
 
-    return jsonify({"ok": True})
+        # COMMENT
+        if order.step == "comment" and text:
+            order.comment = text
+            order.step = "payment"
+            db.session.commit()
 
-
-# =============================
-#   TELEGRAM — MASTER BOT
-# =============================
-
-@app.post("/telegram/master_webhook")
-def master_webhook():
-    update = request.json
-
-    if not update or "message" not in update:
-        return jsonify({"ok": True})
-
-    msg = update["message"]
-    chat_id = msg["chat"]["id"]
-    text = msg.get("text", "")
-
-    # Start
-    if text == "/start":
-        send_master_message(chat_id, "Assalomu alaykum, usta!\nBuyurtmalar: /orders")
-        return jsonify({"ok": True})
-
-    # Orders
-    if text == "/orders":
-        orders = Order.query.filter(Order.status.in_([
-            OrderStatus.NEW, OrderStatus.PENDING, OrderStatus.IN_PROGRESS
-        ])).all()
-
-        if not orders:
-            send_master_message(chat_id, "Buyurtmalar yo‘q.")
+            kb = {
+                "inline_keyboard": [
+                    [{"text": "CLICK", "callback_data": "pay_CLICK"},
+                     {"text": "PAYME", "callback_data": "pay_PAYME"}],
+                    [{"text": "Naqd", "callback_data": "pay_CASH"},
+                     {"text": "QR", "callback_data": "pay_QR"}]
+                ]
+            }
+            send_user_message(chat_id, "To‘lov turini tanlang:", kb)
             return jsonify({"ok": True})
 
-        msg_text = "🔧 Buyurtmalar:\n\n"
-        for o in orders:
-            msg_text += f"#{o.id} — {o.service.name}\n/order_{o.id}\n\n"
+        # CHAT WITH ADMIN
+        if order.step == "chat" and text:
+            db.session.add(Message(order_id=order.id, from_admin=False, text=text))
+            db.session.commit()
 
-        send_master_message(chat_id, msg_text)
-        return jsonify({"ok": True})
+            admin_notify(f"Mijozdan xabar (#{order.id}):\n{text}")
+            return jsonify({"ok": True})
 
-    # One order
-    if text.startswith("/order_"):
-        id = int(text.split("_")[1])
-        order = Order.query.get(id)
 
-        t = f"🧾 Buyurtma #{order.id}\n"
-        t += f"Xizmat: {order.service.name}\n"
-        t += f"Telefon: {order.phone}\n"
-        t += f"Holat: {order.status.value}\n\n"
-        t += f"Ishni boshlash: /startwork_{id}\n"
-        t += f"Ish tugatish: /finish_{id}"
+    # CALLBACK HANDLER
+    if "callback_query" in update:
+        cq = update["callback_query"]
+        data = cq["data"]
+        chat_id = cq["message"]["chat"]["id"]
+        user_id = cq["from"]["id"]
 
-        send_master_message(chat_id, t)
-        return jsonify({"ok": True})
+        order = Order.query.filter_by(
+            user_id=str(user_id),
+            chat_id=str(chat_id)
+        ).order_by(Order.id.desc()).first()
 
-    # Start work
-    if text.startswith("/startwork_"):
-        id = int(text.split("_")[1])
-        order = Order.query.get(id)
-        order.status = OrderStatus.IN_PROGRESS
-        db.session.commit()
+        # CATEGORY
+        if data.startswith("cat_"):
+            cat_id = int(data.split("_")[1])
+            order.category_id = cat_id
+            order.step = "service"
+            db.session.commit()
 
-        send_master_message(chat_id, "Ish boshlandi!")
-        send_user_message(order.user_chat_id, "🧑‍🔧 Usta ishni boshladi!")
-        return jsonify({"ok": True})
+            services = Service.query.filter_by(category_id=cat_id).all()
+            kb = {"inline_keyboard": [
+                [{"text": s.name, "callback_data": f"srv_{s.id}"}] for s in services
+            ]}
 
-    # Finish work
-    if text.startswith("/finish_"):
-        id = int(text.split("_")[1])
-        order = Order.query.get(id)
-        order.status = OrderStatus.DONE
-        db.session.commit()
+            send_user_message(chat_id, "Xizmatni tanlang:", kb)
+            return jsonify({"ok": True})
 
-        send_master_message(chat_id, "Ish tugadi!")
-        send_user_message(order.user_chat_id, "Ish tugatildi! Iltimos, to‘lovni amalga oshiring.")
-        return jsonify({"ok": True})
+        # SERVICE
+        if data.startswith("srv_"):
+            srv_id = int(data.split("_")[1])
+            order.service_id = srv_id
+            order.step = "phone"
+            order.status = OrderStatus.PENDING
+            db.session.commit()
+
+            kb = {
+                "keyboard": [[{"text": "📱 Kontakt ulashish", "request_contact": True}]],
+                "resize_keyboard": True
+            }
+            send_user_message(chat_id, "Telefon raqamingizni yuboring:", kb)
+            return jsonify({"ok": True})
+
+        # PAYMENT
+        if data.startswith("pay_"):
+            order.payment_method = data.replace("pay_", "")
+            order.step = "done"
+            order.status = OrderStatus.IN_PROGRESS
+            db.session.commit()
+
+            send_user_message(
+                chat_id,
+                "Buyurtma qabul qilindi!",
+                {"remove_keyboard": True}
+            )
+
+            admin_notify(f"Yangi buyurtma #{order.id}")
+            return jsonify({"ok": True})
 
     return jsonify({"ok": True})
 
 
-# =============================
-#   RUN
-# =============================
+# ------------------------------------------------------------
+# BOT WEBHOOK — MASTER (USTA) BOT
+# ------------------------------------------------------------
+
+@app.route("/telegram/master_webhook", methods=["POST"])
+def master_webhook():
+    update = request.get_json()
+    if not update:
+        return jsonify({"ok": True})
+
+    # MESSAGE
+    if "message" in update:
+        msg = update["message"]
+        chat_id = msg["chat"]["id"]
+        text = msg.get("text")
+
+        # /start
+        if text == "/start":
+            send_master_message(chat_id,
+                "Assalomu alaykum, Usta!\n"
+                "Buyurtmalar ro‘yxati: /orders"
+            )
+            return jsonify({"ok": True})
+
+        # /orders
+        if text == "/orders":
+            orders = Order.query.filter(
+                Order.status.in_([OrderStatus.PENDING, OrderStatus.IN_PROGRESS])
+            ).all()
+
+            if not orders:
+                send_master_message(chat_id, "Hozircha faol buyurtmalar yo‘q.")
+                return jsonify({"ok": True})
+
+            kb = {"inline_keyboard": [
+                [{"text": f"#{o.id} - {o.service.name}", "callback_data": f"ord_{o.id}"}]
+                for o in orders
+            ]}
+            send_master_message(chat_id, "Buyurtmalar:", kb)
+            return jsonify({"ok": True})
+
+    # CALLBACK
+    if "callback_query" in update:
+        cq = update["callback_query"]
+        data = cq["data"]
+        chat_id = cq["message"]["chat"]["id"]
+
+        if data.startswith("ord_"):
+            order_id = int(data.replace("ord_", ""))
+            order = Order.query.get(order_id)
+
+            text = (
+                f"Buyurtma #{order.id}\n"
+                f"Xizmat: {order.service.name}\n"
+                f"Telefon: {order.phone}\n"
+                f"Izoh: {order.comment}\n"
+                f"To‘lov: {order.payment_method}\n"
+                "\nStatusni tanlang:"
+            )
+
+            kb = {
+                "inline_keyboard": [
+                    [{"text": "🚀 Ishni boshladim",
+                      "callback_data": f"st_{order_id}_start"}],
+                    [{"text": "🏁 Tugatdim",
+                      "callback_data": f"st_{order_id}_done"}]
+                ]
+            }
+
+            send_master_message(chat_id, text, kb)
+            return jsonify({"ok": True})
+
+        if data.startswith("st_"):
+            _, order_id, status = data.split("_")
+            order = Order.query.get(int(order_id))
+
+            if status == "start":
+                order.status = OrderStatus.IN_PROGRESS
+                db.session.commit()
+
+                send_master_message(chat_id, "Ishni boshladingiz!")
+                send_user_message(order.chat_id, "Usta ishni boshladi 🚀")
+                admin_notify(f"Usta #{order.id} ishni boshladi")
+
+            if status == "done":
+                order.status = OrderStatus.DONE
+                db.session.commit()
+
+                send_master_message(chat_id, "Ish tugatildi! 🏁")
+                send_user_message(order.chat_id, "Ish tugatildi! 💳 To‘lov kutilmoqda.")
+                admin_notify(f"Usta #{order.id} ishni tugatdi")
+
+            return jsonify({"ok": True})
+
+    return jsonify({"ok": True})
+
+
+# ------------------------------------------------------------
+# RUN APP
+# ------------------------------------------------------------
 
 if __name__ == "__main__":
-    with app.app_context():
-        db.create_all()
     app.run(host="0.0.0.0", port=5000)
