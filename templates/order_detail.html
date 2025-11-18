@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Buyurtma #{{ order.id }}</h3>
+
+<div class="row">
+  <div class="col-md-6">
+    <div class="card shadow-sm mb-3">
+      <div class="card-body">
+        <h5 class="card-title">Buyurtma ma'lumotlari</h5>
+        <p><strong>Xizmat:</strong> {{ order.service.name if order.service else '-' }}</p>
+        <p><strong>Kategoriya:</strong> {{ order.category.name if order.category else '-' }}</p>
+        <p><strong>Telefon:</strong> {{ order.phone or '-' }}</p>
+        <p><strong>To'lov turi:</strong> {{ order.payment_method or '-' }}</p>
+        <p><strong>Izoh:</strong><br>{{ order.comment or '-' }}</p>
+        <p><strong>Lokatsiya:</strong>
+          {% if order.location_lat and order.location_lng %}
+            <a href="https://maps.google.com/?q={{ order.location_lat }},{{ order.location_lng }}" target="_blank">Google Map</a>
+          {% elif order.address_text %}
+            {{ order.address_text }}
+          {% else %}
+            -
+          {% endif %}
+        </p>
+        <p><strong>Status:</strong> <span class="badge bg-secondary">{{ order.status.value }}</span></p>
+
+        <form method="post" class="row g-2 mt-2">
+          <input type="hidden" name="action" value="set_status">
+          <div class="col-8">
+            <select name="status" class="form-select">
+              {% for st in OrderStatus %}
+              <option value="{{ st.value }}" {% if order.status == st %}selected{% endif %}>{{ st.value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-4">
+            <button class="btn btn-primary w-100">Statusni yangilash</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card shadow-sm mb-3">
+      <div class="card-body">
+        <h5 class="card-title">Chat (Admin ↔ Foydalanuvchi)</h5>
+        <div class="chat-box mb-3" style="max-height: 300px; overflow-y: auto; border: 1px solid #eee; padding: 10px; border-radius: 6px;">
+          {% for m in messages %}
+            <div class="mb-2">
+              {% if m.from_admin %}
+                <div class="text-end">
+                  <span class="badge bg-primary">Admin</span>
+                  <div class="d-inline-block bg-primary text-white px-2 py-1 rounded-3 mt-1">{{ m.text }}</div>
+                </div>
+              {% else %}
+                <div class="text-start">
+                  <span class="badge bg-secondary">Foydalanuvchi</span>
+                  <div class="d-inline-block bg-light px-2 py-1 rounded-3 mt-1">{{ m.text }}</div>
+                </div>
+              {% endif %}
+            </div>
+          {% endfor %}
+          {% if not messages %}
+            <p class="text-muted mb-0">Hozircha xabarlar yo'q.</p>
+          {% endif %}
+        </div>
+
+        <form method="post">
+          <input type="hidden" name="action" value="send_message">
+          <div class="mb-2">
+            <textarea name="text" class="form-control" rows="2" placeholder="Javob yozing..." required></textarea>
+          </div>
+          <button class="btn btn-success">Yuborish</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

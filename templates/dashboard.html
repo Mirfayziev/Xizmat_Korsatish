@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-3">So'nggi buyurtmalar</h3>
+<div class="card shadow-sm">
+  <div class="card-body table-responsive">
+    <table class="table table-hover align-middle">
+      <thead>
+      <tr>
+        <th>#</th>
+        <th>Xizmat</th>
+        <th>To'lov</th>
+        <th>Status</th>
+        <th>Vaqt</th>
+        <th></th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for o in orders %}
+      <tr>
+        <td>{{ o.id }}</td>
+        <td>
+          {% if o.service %}
+            {{ o.service.name }}
+          {% else %}
+            -
+          {% endif %}
+        </td>
+        <td>{{ o.payment_method or '-' }}</td>
+        <td><span class="badge bg-secondary">{{ o.status.value }}</span></td>
+        <td>{{ o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at }}</td>
+        <td><a href="{{ url_for('admin_order_detail', order_id=o.id) }}" class="btn btn-sm btn-outline-primary">Ko'rish</a></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

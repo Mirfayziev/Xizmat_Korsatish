@@ -1,0 +1,435 @@
+import os
+import requests
+from functools import wraps
+
+from flask import Flask, request, render_template, redirect, url_for, session, flash, jsonify
+
+from config import Config
+from models import db, Category, Service, Order, Message, OrderStatus
+
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object(Config)
+    db.init_app(app)
+
+    with app.app_context():
+        db.create_all()
+
+    # --------------- Helpers ---------------
+
+    def send_telegram_message(chat_id, text, reply_markup=None):
+        token = app.config["TELEGRAM_BOT_TOKEN"]
+        if not token or not chat_id:
+            return
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+        }
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        try:
+            requests.post(url, json=payload, timeout=5)
+        except Exception as e:
+            print("Error sending telegram message:", e)
+
+    def build_categories_keyboard():
+        keyboard = []
+        categories = Category.query.order_by(Category.id).all()
+        row = []
+        for i, cat in enumerate(categories, start=1):
+            text = f"{cat.icon} {cat.name}" if cat.icon else cat.name
+            row.append({
+                "text": text,
+                "callback_data": f"cat_{cat.id}",
+            })
+            if i % 2 == 0:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+        return {"inline_keyboard": keyboard} if keyboard else None
+
+    def build_services_keyboard(category_id):
+        services = Service.query.filter_by(category_id=category_id).order_by(Service.id).all()
+        keyboard = []
+        row = []
+        for i, srv in enumerate(services, start=1):
+            price_txt = f" ({srv.price:.0f})" if srv.price is not None else ""
+            text = f"{srv.name}{price_txt}"
+            row.append({
+                "text": text,
+                "callback_data": f"srv_{srv.id}",
+            })
+            if i % 1 == 0:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+        return {"inline_keyboard": keyboard} if keyboard else None
+
+    def build_payment_keyboard():
+        keyboard = [
+            [
+                {"text": "CLICK", "callback_data": "pay_click"},
+                {"text": "PAYME", "callback_data": "pay_payme"},
+            ],
+            [
+                {"text": "Naqd", "callback_data": "pay_cash"},
+                {"text": "QR orqali", "callback_data": "pay_qr"},
+            ],
+        ]
+        return {"inline_keyboard": keyboard}
+
+    def build_share_contact_keyboard():
+        return {
+            "keyboard": [[{"text": "📱 Telefon raqamni ulashish", "request_contact": True}]],
+            "resize_keyboard": True,
+            "one_time_keyboard": True,
+        }
+
+    def build_share_location_keyboard():
+        return {
+            "keyboard": [[{"text": "📍 Lokatsiyani ulashish", "request_location": True}]],
+            "resize_keyboard": True,
+            "one_time_keyboard": True,
+        }
+
+    def get_or_create_active_order(user_id, chat_id):
+        order = (
+            Order.query.filter(
+                Order.user_id == user_id,
+                Order.chat_id == chat_id,
+                Order.status.in_(
+                    [OrderStatus.NEW, OrderStatus.PENDING, OrderStatus.IN_PROGRESS, OrderStatus.PAYMENT_PENDING]
+                ),
+            )
+            .order_by(Order.id.desc())
+            .first()
+        )
+        if not order:
+            order = Order(user_id=user_id, chat_id=chat_id)
+            db.session.add(order)
+            db.session.commit()
+        return order
+
+    # ------------ Auth helpers ------------
+
+    def login_required(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if not session.get("admin_logged_in"):
+                return redirect(url_for("admin_login"))
+            return f(*args, **kwargs)
+        return decorated
+
+    # --------------- Admin routes ---------------
+
+    @app.route("/admin/login", methods=["GET", "POST"])
+    def admin_login():
+        if request.method == "POST":
+            username = request.form.get("username")
+            password = request.form.get("password")
+            if username == app.config["ADMIN_USERNAME"] and password == app.config["ADMIN_PASSWORD"]:
+                session["admin_logged_in"] = True
+                return redirect(url_for("admin_dashboard"))
+            else:
+                flash("Login yoki parol noto'g'ri", "danger")
+        return render_template("login.html")
+
+    @app.route("/admin/logout")
+    def admin_logout():
+        session.pop("admin_logged_in", None)
+        return redirect(url_for("admin_login"))
+
+    @app.route("/")
+    def home():
+        if session.get("admin_logged_in"):
+            return redirect(url_for("admin_dashboard"))
+        return redirect(url_for("admin_login"))
+
+    @app.route("/admin/dashboard")
+    @login_required
+    def admin_dashboard():
+        orders = Order.query.order_by(Order.created_at.desc()).limit(20).all()
+        return render_template("dashboard.html", orders=orders, OrderStatus=OrderStatus)
+
+    @app.route("/admin/categories")
+    @login_required
+    def admin_categories():
+        categories = Category.query.order_by(Category.id).all()
+        return render_template("categories.html", categories=categories)
+
+    @app.route("/admin/categories/add", methods=["POST"])
+    @login_required
+    def admin_add_category():
+        name = request.form.get("name")
+        icon = request.form.get("icon")
+        if name:
+            cat = Category(name=name, icon=icon or None)
+            db.session.add(cat)
+            db.session.commit()
+        return redirect(url_for("admin_categories"))
+
+    @app.route("/admin/categories/<int:cat_id>/delete", methods=["POST"])
+    @login_required
+    def admin_delete_category(cat_id):
+        cat = Category.query.get_or_404(cat_id)
+        db.session.delete(cat)
+        db.session.commit()
+        return redirect(url_for("admin_categories"))
+
+    @app.route("/admin/services")
+    @login_required
+    def admin_services():
+        services = Service.query.order_by(Service.id).all()
+        categories = Category.query.order_by(Category.id).all()
+        return render_template("services.html", services=services, categories=categories)
+
+    @app.route("/admin/services/add", methods=["POST"])
+    @login_required
+    def admin_add_service():
+        name = request.form.get("name")
+        price = request.form.get("price")
+        description = request.form.get("description")
+        category_id = request.form.get("category_id")
+        if name and category_id:
+            price_value = float(price) if price else None
+            srv = Service(
+                name=name,
+                price=price_value,
+                description=description,
+                category_id=int(category_id),
+            )
+            db.session.add(srv)
+            db.session.commit()
+        return redirect(url_for("admin_services"))
+
+    @app.route("/admin/services/<int:srv_id>/delete", methods=["POST"])
+    @login_required
+    def admin_delete_service(srv_id):
+        srv = Service.query.get_or_404(srv_id)
+        db.session.delete(srv)
+        db.session.commit()
+        return redirect(url_for("admin_services"))
+
+    @app.route("/admin/orders")
+    @login_required
+    def admin_orders():
+        status_filter = request.args.get("status")
+        query = Order.query
+        if status_filter:
+            try:
+                status_enum = OrderStatus(status_filter)
+                query = query.filter_by(status=status_enum)
+            except ValueError:
+                pass
+        orders = query.order_by(Order.created_at.desc()).all()
+        return render_template("orders.html", orders=orders, OrderStatus=OrderStatus, status_filter=status_filter)
+
+    @app.route("/admin/orders/<int:order_id>", methods=["GET", "POST"])
+    @login_required
+    def admin_order_detail(order_id):
+        order = Order.query.get_or_404(order_id)
+        if request.method == "POST":
+            action = request.form.get("action")
+            if action == "set_status":
+                new_status = request.form.get("status")
+                try:
+                    order.status = OrderStatus(new_status)
+                    db.session.commit()
+                except ValueError:
+                    pass
+
+                # If job done -> notify user payment pending
+                if order.status == OrderStatus.DONE or order.status == OrderStatus.PAYMENT_PENDING:
+                    text = "✅ Ish bajarildi.
+💳 To'lov kutilmoqda."
+                    send_telegram_message(order.chat_id, text)
+
+            if action == "send_message":
+                text = request.form.get("text")
+                if text:
+                    msg = Message(order_id=order.id, from_admin=True, text=text)
+                    db.session.add(msg)
+                    db.session.commit()
+                    # send to user in Telegram chat
+                    send_telegram_message(order.chat_id, f"👨‍💼 Admin: {text}")
+
+            return redirect(url_for("admin_order_detail", order_id=order.id))
+
+        messages = Message.query.filter_by(order_id=order.id).order_by(Message.created_at.asc()).all()
+        return render_template("order_detail.html", order=order, messages=messages, OrderStatus=OrderStatus)
+
+    # --------------- Telegram Webhook ---------------
+
+    @app.route("/telegram/webhook", methods=["POST"])
+    def telegram_webhook():
+        data = request.get_json(force=True)
+        handle_telegram_update(data)
+        return jsonify({"ok": True})
+
+    def handle_telegram_update(update):
+        # message
+        if "message" in update:
+            message = update["message"]
+            chat_id = message["chat"]["id"]
+            user_id = message["from"]["id"]
+            text = message.get("text")
+            contact = message.get("contact")
+            location = message.get("location")
+
+            order = get_or_create_active_order(user_id, chat_id)
+
+            if text == "/start":
+                order.step = "category"
+                order.status = OrderStatus.NEW
+                db.session.commit()
+                welcome_text = (
+                    "Assalomu alaykum! 👋\n"
+                    "Xizmat turini tanlang:"
+                )
+                reply_markup = build_categories_keyboard()
+                send_telegram_message(chat_id, welcome_text, reply_markup=reply_markup)
+                return
+
+            # if conversation step
+            if order.step == "phone":
+                if contact and contact.get("phone_number"):
+                    order.phone = contact["phone_number"]
+                elif text:
+                    order.phone = text
+                order.step = "location"
+                db.session.commit()
+                send_telegram_message(
+                    chat_id,
+                    "📍 Lokatsiyani yuboring (Share Location tugmasidan foydalanib).",
+                    reply_markup=build_share_location_keyboard(),
+                )
+                return
+
+            if order.step == "location":
+                if location:
+                    order.location_lat = location.get("latitude")
+                    order.location_lng = location.get("longitude")
+                    order.step = "comment"
+                    db.session.commit()
+                    send_telegram_message(chat_id, "✍️ Usta o'zi bilan nima olib kelishi kerak? Izoh qoldiring:")
+                    return
+                elif text:
+                    order.address_text = text
+                    order.step = "comment"
+                    db.session.commit()
+                    send_telegram_message(chat_id, "✍️ Usta o'zi bilan nima olib kelishi kerak? Izoh qoldiring:")
+                    return
+
+            if order.step == "comment":
+                if text:
+                    order.comment = text
+                    order.step = "payment"
+                    db.session.commit()
+                    send_telegram_message(chat_id, "💳 To'lov turini tanlang:", reply_markup=build_payment_keyboard())
+                    return
+
+            # User free-text message -> treat as chat msg
+            if text:
+                msg = Message(order_id=order.id, from_admin=False, text=text)
+                db.session.add(msg)
+                db.session.commit()
+
+                # notify admin (optional)
+                admin_chat_id = app.config.get("TELEGRAM_ADMIN_CHAT_ID")
+                if admin_chat_id:
+                    send_telegram_message(
+                        admin_chat_id,
+                        f"📩 Yangi xabar (Order #{order.id}):\n{text}",
+                    )
+
+        # callback query (inline keyboard)
+        if "callback_query" in update:
+            cq = update["callback_query"]
+            data = cq.get("data")
+            chat_id = cq["message"]["chat"]["id"]
+            user_id = cq["from"]["id"]
+
+            order = get_or_create_active_order(user_id, chat_id)
+
+            if data.startswith("cat_"):
+                cat_id = int(data.split("_")[1])
+                category = Category.query.get(cat_id)
+                if not category:
+                    send_telegram_message(chat_id, "Kategoriya topilmadi.")
+                    return
+                order.category_id = cat_id
+                order.step = "service"
+                db.session.commit()
+
+                services_keyboard = build_services_keyboard(cat_id)
+                if not services_keyboard:
+                    send_telegram_message(chat_id, "Bu kategoriyada xizmatlar topilmadi.")
+                    return
+                text = f"{category.icon or ''} <b>{category.name}</b> kategoriyasi.\nXizmat turini tanlang:"
+                send_telegram_message(chat_id, text, reply_markup=services_keyboard)
+                return
+
+            if data.startswith("srv_"):
+                srv_id = int(data.split("_")[1])
+                service = Service.query.get(srv_id)
+                if not service:
+                    send_telegram_message(chat_id, "Xizmat topilmadi.")
+                    return
+                order.service_id = srv_id
+                order.step = "phone"
+                order.status = OrderStatus.PENDING
+                db.session.commit()
+
+                summary = f"✅ Xizmat tanlandi:\n<b>{service.name}</b>\n"
+                if service.price is not None:
+                    summary += f"Narx: {service.price:.0f}\n"
+                if service.description:
+                    summary += f"\n{service.description}\n"
+                summary += "\n📱 Telefon raqamingizni yuboring:"
+                send_telegram_message(chat_id, summary, reply_markup=build_share_contact_keyboard())
+                return
+
+            if data.startswith("pay_"):
+                pay_code = data.split("_")[1]
+                mapping = {
+                    "click": "CLICK",
+                    "payme": "PAYME",
+                    "cash": "Naqd",
+                    "qr": "QR orqali",
+                }
+                order.payment_method = mapping.get(pay_code, pay_code)
+                order.status = OrderStatus.IN_PROGRESS
+                order.step = "done"
+                db.session.commit()
+
+                text_lines = [
+                    "✅ Buyurtmangiz qabul qilindi!",
+                    "",
+                ]
+                if order.service:
+                    text_lines.append(f"Xizmat: {order.service.name}")
+                if order.payment_method:
+                    text_lines.append(f"To'lov turi: {order.payment_method}")
+                text_lines.append("")
+                text_lines.append("Usta tez orada siz bilan bog'lanadi yoki keladi.")
+                send_telegram_message(chat_id, "\n".join(text_lines))
+
+                # notify admin
+                admin_chat_id = app.config.get("TELEGRAM_ADMIN_CHAT_ID")
+                if admin_chat_id:
+                    send_telegram_message(
+                        admin_chat_id,
+                        f"🆕 Yangi buyurtma #{order.id}\nXizmat: {order.service.name if order.service else ''}",
+                    )
+                return
+
+    return app
+
+app = create_app()
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

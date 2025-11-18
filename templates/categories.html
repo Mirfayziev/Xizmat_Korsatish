@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3>Kategoriyalar</h3>
+</div>
+
+<div class="row mb-4">
+  <div class="col-md-6">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title">Yangi kategoriya qo'shish</h5>
+        <form method="post" action="{{ url_for('admin_add_category') }}">
+          <div class="mb-3">
+            <label class="form-label">Kategoriya nomi</label>
+            <input type="text" name="name" class="form-control" placeholder="Elektrika, Santexnika..." required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Emoji / Icon (ixtiyoriy)</label>
+            <input type="text" name="icon" class="form-control" placeholder="🔌, 🚰, 🛠 ...">
+          </div>
+          <button type="submit" class="btn btn-primary">Saqlash</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="card-body table-responsive">
+    <table class="table align-middle">
+      <thead>
+      <tr>
+        <th>#</th>
+        <th>Emoji</th>
+        <th>Nomi</th>
+        <th></th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for c in categories %}
+      <tr>
+        <td>{{ c.id }}</td>
+        <td>{{ c.icon }}</td>
+        <td>{{ c.name }}</td>
+        <td>
+          <form method="post" action="{{ url_for('admin_delete_category', cat_id=c.id) }}" onsubmit="return confirm('O‘chirasizmi?');">
+            <button class="btn btn-sm btn-outline-danger">O'chirish</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
