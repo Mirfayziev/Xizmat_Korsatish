@@ -1,23 +1,32 @@
 import os
 
 class Config:
-    SECRET_KEY = os.environ.get("SECRET_KEY", "change-this-secret-key")
-    SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL", "sqlite:///app.db")
+    SECRET_KEY = os.environ.get("SECRET_KEY", "super-secret-key")
+
+    # Database
+    SQLALCHEMY_DATABASE_URI = os.environ.get(
+        "DATABASE_URL",
+        "sqlite:///imperiya.db"
+    )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # Admin login
     ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
     ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 
-    # 1-bot (foydalanuvchi bot) tokeni
+    # Telegram bots
     TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-
-    # 2-bot (usta bot) tokeni – hozircha placeholder, keyin ishlatamiz
     TELEGRAM_MASTER_BOT_TOKEN = os.environ.get("TELEGRAM_MASTER_BOT_TOKEN", "")
 
-    # Adminga bot orqali xabar yuborish uchun chat_id (ixtiyoriy)
+    # Admin chat ID
     TELEGRAM_ADMIN_CHAT_ID = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "")
 
-    # Usta ulushi (foizda) – xarajat hisoblash uchun
-    # Masalan: 70 degani 70% ustaniki, 30% seniki profit
-    MASTER_SHARE_PERCENT = float(os.environ.get("MASTER_SHARE_PERCENT", "30"))
+    # AI – Whisper + GPT-4o-mini
+    OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+
+    # Usta ulushi (%)
+    MASTER_SHARE_PERCENT = float(os.environ.get("MASTER_SHARE_PERCENT", 70))
+
+    # Audio fayllarni yuklash papkasi
+    UPLOAD_FOLDER = os.path.join(os.getcwd(), "uploads")
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
