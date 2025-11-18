@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-3">Analitika</h3>
+
+<div class="row mb-4">
+  <div class="col-md-4">
+    <div class="card shadow-sm">
+      <div class="card-body text-center">
+        <h6 class="text-muted">Umumiy buyurtmalar</h6>
+        <h2>{{ total_orders }}</h2>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card shadow-sm">
+      <div class="card-body text-center">
+        <h6 class="text-muted">Yakunlangan / to'lov kutilayotgan</h6>
+        <h2>{{ total_done }}</h2>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card shadow-sm">
+      <div class="card-body text-center">
+        <h6 class="text-muted">Jarayonda (IN_PROGRESS)</h6>
+        <h2>{{ total_in_progress }}</h2>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row mb-4">
+  <div class="col-md-6">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title">Xizmatlar bo'yicha buyurtmalar</h5>
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+          <tr>
+            <th>Xizmat</th>
+            <th class="text-end">Buyurtmalar</th>
+          </tr>
+          </thead>
+          <tbody>
+          {% for name, count in services_stats %}
+          <tr>
+            <td>{{ name }}</td>
+            <td class="text-end">{{ count }}</td>
+          </tr>
+          {% endfor %}
+          {% if not services_stats %}
+          <tr><td colspan="2" class="text-muted">Hozircha ma'lumot yo'q.</td></tr>
+          {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title">Kategoriyalar bo'yicha buyurtmalar</h5>
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+          <tr>
+            <th>Kategoriya</th>
+            <th class="text-end">Buyurtmalar</th>
+          </tr>
+          </thead>
+          <tbody>
+          {% for name, count in categories_stats %}
+          <tr>
+            <td>{{ name }}</td>
+            <td class="text-end">{{ count }}</td>
+          </tr>
+          {% endfor %}
+          {% if not categories_stats %}
+          <tr><td colspan="2" class="text-muted">Hozircha ma'lumot yo'q.</td></tr>
+          {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row mb-4">
+  <div class="col-md-6">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title">To'lov turlari bo'yicha</h5>
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+          <tr>
+            <th>To'lov turi</th>
+            <th class="text-end">Buyurtmalar</th>
+          </tr>
+          </thead>
+          <tbody>
+          {% for method, count in payment_stats %}
+          <tr>
+            <td>{{ method or '—' }}</td>
+            <td class="text-end">{{ count }}</td>
+          </tr>
+          {% endfor %}
+          {% if not payment_stats %}
+          <tr><td colspan="2" class="text-muted">Hozircha ma'lumot yo'q.</td></tr>
+          {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title">Kunlik buyurtmalar</h5>
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+          <tr>
+            <th>Sana</th>
+            <th class="text-end">Buyurtmalar</th>
+          </tr>
+          </thead>
+          <tbody>
+          {% for day, count in daily_stats %}
+          <tr>
+            <td>{{ day }}</td>
+            <td class="text-end">{{ count }}</td>
+          </tr>
+          {% endfor %}
+          {% if not daily_stats %}
+          <tr><td colspan="2" class="text-muted">Hozircha ma'lumot yo'q.</td></tr>
+          {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
