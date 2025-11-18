@@ -27,11 +27,11 @@ def create_app():
     with app.app_context():
         db.create_all()
 
-    # --------------- Helpers ---------------
+    # ---------------- HELPERS ----------------
 
-    def send_telegram_message(chat_id, text, reply_markup=None):
-        """Bot orqali xabar yuborish."""
-        token = app.config["TELEGRAM_BOT_TOKEN"]
+    def send_user_message(chat_id, text, reply_markup=None):
+        """Foydalanuvchi botidan xabar yuborish."""
+        token = app.config.get("TELEGRAM_BOT_TOKEN")
         if not token or not chat_id:
             return
         url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -45,9 +45,25 @@ def create_app():
         try:
             requests.post(url, json=payload, timeout=5)
         except Exception as e:
-            print("Error sending telegram message:", e)
+            print("Error sending user telegram message:", e)
 
-        return
+    def send_master_message(chat_id, text, reply_markup=None):
+        """Usta botidan xabar yuborish."""
+        token = app.config.get("TELEGRAM_MASTER_BOT_TOKEN")
+        if not token or not chat_id:
+            return
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+        }
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        try:
+            requests.post(url, json=payload, timeout=5)
+        except Exception as e:
+            print("Error sending master telegram message:", e)
 
     def build_categories_keyboard():
         categories = Category.query.order_by(Category.id).all()
@@ -167,7 +183,7 @@ def create_app():
             db.session.commit()
         return order
 
-    # ------------ Auth helpers ------------
+    # ---------------- AUTH HELPERS ----------------
 
     def login_required(f):
         @wraps(f)
@@ -178,7 +194,7 @@ def create_app():
 
         return decorated
 
-    # --------------- Admin routes ---------------
+    # ---------------- ADMIN ROUTES ----------------
 
     @app.route("/admin/login", methods=["GET", "POST"])
     def admin_login():
@@ -320,12 +336,12 @@ def create_app():
                         "✅ Ish bajarildi.\n"
                         "💳 To'lov kutilmoqda."
                     )
-                    send_telegram_message(order.chat_id, text)
+                    send_user_message(order.chat_id, text)
 
-                # Admin o'zi ham xabardor bo'lishi uchun
+                # Adminga xabar
                 admin_chat_id = app.config.get("TELEGRAM_ADMIN_CHAT_ID")
                 if admin_chat_id:
-                    send_telegram_message(
+                    send_user_message(
                         admin_chat_id,
                         f"ℹ️ Buyurtma #{order.id} statusi yangilandi: {order.status.value}",
                     )
@@ -336,8 +352,8 @@ def create_app():
                     msg = Message(order_id=order.id, from_admin=True, text=text)
                     db.session.add(msg)
                     db.session.commit()
-                    # send to user in Telegram chat
-                    send_telegram_message(
+                    # Foydalanuvchiga yuboramiz
+                    send_user_message(
                         order.chat_id,
                         f"👨‍💼 Admin: {text}",
                     )
@@ -356,7 +372,7 @@ def create_app():
             OrderStatus=OrderStatus,
         )
 
-    # --------------- ANALYTICS ---------------
+    # ---------------- ANALYTICS ----------------
 
     @app.route("/admin/analytics")
     @login_required
@@ -378,7 +394,7 @@ def create_app():
             Order.query.filter(Order.status == OrderStatus.IN_PROGRESS).count()
         )
 
-        # Xizmatlar bo'yicha buyurtmalar
+        # Xizmatlar bo'yicha buyurtmalar soni
         services_stats = (
             db.session.query(Service.name, func.count(Order.id))
             .join(Order, Order.service_id == Service.id)
@@ -387,7 +403,7 @@ def create_app():
             .all()
         )
 
-        # Kategoriya bo'yicha buyurtmalar
+        # Kategoriyalar bo'yicha buyurtmalar
         categories_stats = (
             db.session.query(Category.name, func.count(Order.id))
             .join(Order, Order.category_id == Category.id)
@@ -414,6 +430,31 @@ def create_app():
             .all()
         )
 
+        # Daromad / xarajat / foyda
+        revenue_q = (
+            db.session.query(func.coalesce(func.sum(Service.price), 0))
+            .join(Order, Order.service_id == Service.id)
+            .filter(
+                Order.status.in_(
+                    [
+                        OrderStatus.DONE,
+                        OrderStatus.PAYMENT_PENDING,
+                        OrderStatus.CLOSED,
+                    ]
+                )
+            )
+        )
+        total_revenue = revenue_q.scalar() or 0
+
+        master_percent = app.config.get("MASTER_SHARE_PERCENT", 70.0)
+        try:
+            master_percent = float(master_percent)
+        except ValueError:
+            master_percent = 70.0
+
+        total_master_cost = total_revenue * (master_percent / 100.0)
+        total_profit = total_revenue - total_master_cost
+
         return render_template(
             "analytics.html",
             total_orders=total_orders,
@@ -423,17 +464,36 @@ def create_app():
             categories_stats=categories_stats,
             payment_stats=payment_stats,
             daily_stats=daily_stats,
+            total_revenue=total_revenue,
+            total_master_cost=total_master_cost,
+            total_profit=total_profit,
+            master_percent=master_percent,
         )
 
-    # --------------- Telegram Webhook ---------------
+    # ---------------- WEBHOOK ROUTES ----------------
 
     @app.route("/telegram/webhook", methods=["POST"])
-    def telegram_webhook():
+    def telegram_webhook_compat():
+        # Eski webhook manzil bilan moslik uchun
         data = request.get_json(force=True)
-        handle_telegram_update(data)
+        handle_user_update(data)
         return jsonify({"ok": True})
 
-    def handle_telegram_update(update):
+    @app.route("/telegram/user_webhook", methods=["POST"])
+    def telegram_user_webhook():
+        data = request.get_json(force=True)
+        handle_user_update(data)
+        return jsonify({"ok": True})
+
+    @app.route("/telegram/master_webhook", methods=["POST"])
+    def telegram_master_webhook():
+        data = request.get_json(force=True)
+        handle_master_update(data)
+        return jsonify({"ok": True})
+
+    # ---------------- USER BOT LOGIC ----------------
+
+    def handle_user_update(update):
         # message
         if "message" in update:
             message = update["message"]
@@ -455,7 +515,7 @@ def create_app():
                     "Xizmat turini tanlang:"
                 )
                 reply_markup = build_categories_keyboard()
-                send_telegram_message(
+                send_user_message(
                     chat_id,
                     welcome_text,
                     reply_markup=reply_markup,
@@ -470,7 +530,7 @@ def create_app():
 
                 admin_chat_id = app.config.get("TELEGRAM_ADMIN_CHAT_ID")
                 if admin_chat_id:
-                    send_telegram_message(
+                    send_user_message(
                         admin_chat_id,
                         f"💬 Yangi xabar (Order #{order.id}):\n{text}",
                     )
@@ -484,7 +544,7 @@ def create_app():
                     order.phone = text
                 order.step = "location"
                 db.session.commit()
-                send_telegram_message(
+                send_user_message(
                     chat_id,
                     "📍 Lokatsiyani yuboring (Share Location tugmasidan foydalanib) yoki manzilni matn ko'rinishida yozing.",
                     reply_markup=build_share_location_keyboard(),
@@ -498,7 +558,7 @@ def create_app():
                     order.location_lng = location.get("longitude")
                     order.step = "comment"
                     db.session.commit()
-                    send_telegram_message(
+                    send_user_message(
                         chat_id,
                         "✍️ Usta o'zi bilan nima olib kelishi kerak? Izoh qoldiring:",
                         reply_markup={"remove_keyboard": True},
@@ -508,7 +568,7 @@ def create_app():
                     order.address_text = text
                     order.step = "comment"
                     db.session.commit()
-                    send_telegram_message(
+                    send_user_message(
                         chat_id,
                         "✍️ Usta o'zi bilan nima olib kelishi kerak? Izoh qoldiring:",
                         reply_markup={"remove_keyboard": True},
@@ -521,7 +581,7 @@ def create_app():
                     order.comment = text
                     order.step = "payment"
                     db.session.commit()
-                    send_telegram_message(
+                    send_user_message(
                         chat_id,
                         "💳 To'lov turini tanlang:",
                         reply_markup=build_payment_keyboard(),
@@ -536,7 +596,7 @@ def create_app():
 
                 admin_chat_id = app.config.get("TELEGRAM_ADMIN_CHAT_ID")
                 if admin_chat_id:
-                    send_telegram_message(
+                    send_user_message(
                         admin_chat_id,
                         f"📩 Yangi xabar (Order #{order.id}):\n{text}",
                     )
@@ -556,21 +616,21 @@ def create_app():
                 db.session.commit()
                 admin_chat_id = app.config.get("TELEGRAM_ADMIN_CHAT_ID")
                 if admin_chat_id:
-                    send_telegram_message(
+                    send_user_message(
                         admin_chat_id,
                         f"📞 Foydalanuvchi siz bilan bog'lanmoqchi. Order #{order.id}",
                     )
-                send_telegram_message(
+                send_user_message(
                     chat_id,
                     "✍️ Xabaringizni yozing. Admin sizga javob qaytaradi.",
                 )
                 return
 
-            # Orqaga menyuga qaytish (istasa keyin qo'shishimiz mumkin)
+            # Orqaga menyuga qaytish (agar kerak bo'lsa)
             if data == "back_to_menu":
                 order.step = "category"
                 db.session.commit()
-                send_telegram_message(
+                send_user_message(
                     chat_id,
                     "Xizmat turini tanlang:",
                     reply_markup=build_categories_keyboard(),
@@ -582,7 +642,7 @@ def create_app():
                 cat_id = int(data.split("_")[1])
                 category = Category.query.get(cat_id)
                 if not category:
-                    send_telegram_message(chat_id, "Kategoriya topilmadi.")
+                    send_user_message(chat_id, "Kategoriya topilmadi.")
                     return
                 order.category_id = cat_id
                 order.step = "service"
@@ -590,7 +650,7 @@ def create_app():
 
                 services_keyboard = build_services_keyboard(cat_id)
                 if not services_keyboard:
-                    send_telegram_message(
+                    send_user_message(
                         chat_id,
                         "Bu kategoriyada xizmatlar topilmadi.",
                     )
@@ -599,7 +659,7 @@ def create_app():
                     f"{category.icon or ''} <b>{category.name}</b> kategoriyasi.\n"
                     "Xizmat turini tanlang:"
                 )
-                send_telegram_message(
+                send_user_message(
                     chat_id,
                     text,
                     reply_markup=services_keyboard,
@@ -611,7 +671,7 @@ def create_app():
                 srv_id = int(data.split("_")[1])
                 service = Service.query.get(srv_id)
                 if not service:
-                    send_telegram_message(chat_id, "Xizmat topilmadi.")
+                    send_user_message(chat_id, "Xizmat topilmadi.")
                     return
                 order.service_id = srv_id
                 order.step = "phone"
@@ -624,7 +684,7 @@ def create_app():
                 if service.description:
                     summary += f"\n{service.description}\n"
                 summary += "\n📱 Telefon raqamingizni yuboring:"
-                send_telegram_message(
+                send_user_message(
                     chat_id,
                     summary,
                     reply_markup=build_share_contact_keyboard(),
@@ -646,7 +706,7 @@ def create_app():
                 db.session.commit()
 
                 # Lokatsiya / kontakt keyboardlarini yopamiz
-                send_telegram_message(
+                send_user_message(
                     chat_id,
                     "🎉 Buyurtmangiz qabul qilindi!",
                     reply_markup={"remove_keyboard": True},
@@ -666,18 +726,188 @@ def create_app():
                 text_lines.append(
                     "Usta tez orada siz bilan bog'lanadi yoki keladi."
                 )
-                send_telegram_message(chat_id, "\n".join(text_lines))
+                send_user_message(chat_id, "\n".join(text_lines))
 
                 # Adminga ham xabar
                 admin_chat_id = app.config.get("TELEGRAM_ADMIN_CHAT_ID")
                 if admin_chat_id:
-                    send_telegram_message(
+                    send_user_message(
                         admin_chat_id,
                         f"🆕 Yangi buyurtma #{order.id}\n"
                         f"Xizmat: {order.service.name if order.service else ''}\n"
                         f"To'lov: {order.payment_method or '-'}",
                     )
                 return
+
+    # ---------------- MASTER BOT LOGIC ----------------
+
+    def handle_master_update(update):
+        """
+        Usta bot logikasi.
+        Hozircha soddaroq variant: usta buyurtmalar ro'yxatini ko'radi va statusni yangilaydi.
+        Keyin shu yerga audio + AI tahlilni qo'shsa bo'ladi.
+        """
+        # message
+        if "message" in update:
+            message = update["message"]
+            chat_id = message["chat"]["id"]
+            text = message.get("text")
+
+            if text == "/start":
+                send_master_message(
+                    chat_id,
+                    "Assalomu alaykum, usta! 👷\n"
+                    "Siz uchun biriktirilgan buyurtmalar ro'yxatini ko'rish uchun /orders buyrug'ini bosing.",
+                )
+                return
+
+            if text == "/orders":
+                # Hozircha barcha PENDING va IN_PROGRESS buyurtmalarni ko'rsatamiz
+                orders = (
+                    Order.query.filter(
+                        Order.status.in_(
+                            [OrderStatus.PENDING, OrderStatus.IN_PROGRESS]
+                        )
+                    )
+                    .order_by(Order.created_at.asc())
+                    .limit(20)
+                    .all()
+                )
+                if not orders:
+                    send_master_message(
+                        chat_id,
+                        "Hozir siz uchun faol buyurtmalar yo'q.",
+                    )
+                    return
+
+                keyboard = []
+                for o in orders:
+                    title = o.service.name if o.service else f"Order #{o.id}"
+                    keyboard.append(
+                        [
+                            {
+                                "text": f"#{o.id} - {title}",
+                                "callback_data": f"mord_{o.id}",
+                            }
+                        ]
+                    )
+                send_master_message(
+                    chat_id,
+                    "Faol buyurtmalar:",
+                    reply_markup={"inline_keyboard": keyboard},
+                )
+                return
+
+            # Hozircha: usta matn yozsa – admin'ga uzatiladi
+            if text:
+                admin_chat_id = app.config.get("TELEGRAM_ADMIN_CHAT_ID")
+                if admin_chat_id:
+                    send_user_message(
+                        admin_chat_id,
+                        f"👷 Ustadan xabar:\n{text}",
+                    )
+                send_master_message(
+                    chat_id,
+                    "Xabaringiz qabul qilindi, rahmat.",
+                )
+                return
+
+        # callback query
+        if "callback_query" in update:
+            cq = update["callback_query"]
+            data = cq.get("data")
+            chat_id = cq["message"]["chat"]["id"]
+
+            if data.startswith("mord_"):
+                order_id = int(data.split("_")[1])
+                order = Order.query.get(order_id)
+                if not order:
+                    send_master_message(chat_id, "Buyurtma topilmadi.")
+                    return
+
+                text_lines = [
+                    f"📝 Buyurtma #{order.id}",
+                ]
+                if order.service:
+                    text_lines.append(f"Xizmat: {order.service.name}")
+                if order.phone:
+                    text_lines.append(f"Telefon: {order.phone}")
+                if order.comment:
+                    text_lines.append(f"Izoh: {order.comment}")
+                if order.payment_method:
+                    text_lines.append(f"To'lov: {order.payment_method}")
+                text_lines.append(f"Status: {order.status.value}")
+                text_lines.append("")
+                text_lines.append("Statusni tanlang:")
+
+                keyboard = [
+                    [
+                        {
+                            "text": "🚀 Ishni boshladim",
+                            "callback_data": f"mstatus_{order.id}_in_progress",
+                        }
+                    ],
+                    [
+                        {
+                            "text": "🏁 Ish tugadi",
+                            "callback_data": f"mstatus_{order.id}_done",
+                        }
+                    ],
+                ]
+                send_master_message(
+                    chat_id,
+                    "\n".join(text_lines),
+                    reply_markup={"inline_keyboard": keyboard},
+                )
+                return
+
+            if data.startswith("mstatus_"):
+                parts = data.split("_")
+                if len(parts) != 3:
+                    return
+                order_id = int(parts[1])
+                new_st = parts[2]
+                order = Order.query.get(order_id)
+                if not order:
+                    send_master_message(chat_id, "Buyurtma topilmadi.")
+                    return
+
+                if new_st == "in_progress":
+                    order.status = OrderStatus.IN_PROGRESS
+                    db.session.commit()
+                    send_master_message(
+                        chat_id,
+                        f"Buyurtma #{order.id} statusi: IN_PROGRESS",
+                    )
+                    # Adminga info
+                    admin_chat_id = app.config.get("TELEGRAM_ADMIN_CHAT_ID")
+                    if admin_chat_id:
+                        send_user_message(
+                            admin_chat_id,
+                            f"👷 Usta buyurtma #{order.id} ishini boshladi.",
+                        )
+                    return
+
+                if new_st == "done":
+                    order.status = OrderStatus.DONE
+                    db.session.commit()
+                    send_master_message(
+                        chat_id,
+                        f"Buyurtma #{order.id} statusi: DONE",
+                    )
+                    # Foydalanuvchiga
+                    send_user_message(
+                        order.chat_id,
+                        "✅ Ish bajarildi.\n💳 To'lov kutilmoqda.",
+                    )
+                    # Adminga
+                    admin_chat_id = app.config.get("TELEGRAM_ADMIN_CHAT_ID")
+                    if admin_chat_id:
+                        send_user_message(
+                            admin_chat_id,
+                            f"👷 Usta buyurtma #{order.id} ishini tugatdi.",
+                        )
+                    return
 
     return app
 
