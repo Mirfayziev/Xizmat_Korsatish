@@ -1,52 +1,70 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h3>Buyurtmalar</h3>
-  <form class="d-flex" method="get">
-    <select name="status" class="form-select me-2">
-      <option value="">Barchasi</option>
-      {% for st in OrderStatus %}
-      <option value="{{ st.value }}" {% if status_filter == st.value %}selected{% endif %}>{{ st.value }}</option>
-      {% endfor %}
-    </select>
-    <button class="btn btn-outline-primary" type="submit">Filter</button>
-  </form>
+
+<h3 class="mb-4">📦 Buyurtmalar</h3>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+
+        <form method="GET" class="row">
+
+            <div class="col-md-4">
+                <select name="status" class="form-select">
+                    <option value="">Barchasi</option>
+                    <option value="NEW">NEW</option>
+                    <option value="PENDING">PENDING</option>
+                    <option value="IN_PROGRESS">IN_PROGRESS</option>
+                    <option value="DONE">DONE</option>
+                    <option value="PAYMENT_PENDING">PAYMENT_PENDING</option>
+                    <option value="CLOSED">CLOSED</option>
+                </select>
+            </div>
+
+            <div class="col-md-2">
+                <button class="btn btn-dark w-100">Filter</button>
+            </div>
+
+        </form>
+
+    </div>
 </div>
 
+
 <div class="card shadow-sm">
-  <div class="card-body table-responsive">
-    <table class="table table-hover align-middle">
-      <thead>
-      <tr>
-        <th>#</th>
-        <th>Xizmat</th>
-        <th>Telefon</th>
-        <th>To'lov</th>
-        <th>Status</th>
-        <th>Vaqt</th>
-        <th></th>
-      </tr>
-      </thead>
-      <tbody>
-      {% for o in orders %}
-      <tr>
-        <td>{{ o.id }}</td>
-        <td>
-          {% if o.service %}
-            {{ o.service.name }}
-          {% else %}
-            -
-          {% endif %}
-        </td>
-        <td>{{ o.phone or '-' }}</td>
-        <td>{{ o.payment_method or '-' }}</td>
-        <td><span class="badge bg-secondary">{{ o.status.value }}</span></td>
-        <td>{{ o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at }}</td>
-        <td><a href="{{ url_for('admin_order_detail', order_id=o.id) }}" class="btn btn-sm btn-outline-primary">Ko'rish</a></td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
+    <div class="card-body">
+
+        <table class="table">
+            <thead>
+            <tr>
+                <th>ID</th>
+                <th>Xizmat</th>
+                <th>Mijoz</th>
+                <th>Status</th>
+                <th>Sana</th>
+                <th></th>
+            </tr>
+            </thead>
+
+            <tbody>
+            {% for o in orders %}
+            <tr>
+                <td>#{{ o.id }}</td>
+                <td>{{ o.service.name if o.service else "-" }}</td>
+                <td>{{ o.phone }}</td>
+                <td>
+                    <span class="badge bg-secondary">{{ o.status.value }}</span>
+                </td>
+                <td>{{ o.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+                <td>
+                    <a href="/admin/orders/{{ o.id }}" class="btn btn-sm btn-dark">Ko‘rish</a>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+
+        </table>
+
+    </div>
 </div>
+
 {% endblock %}
