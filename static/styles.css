@@ -1,17 +1,152 @@
-body {
-  background-color: #f5f5f7;
-}
+/* ============================
+   GLOBAL STYLE
+============================ */
 
-.navbar-brand {
-  font-weight: 600;
-  letter-spacing: 0.03em;
+body {
+    background: #f5f6fa !important;
+    font-family: "Segoe UI", sans-serif;
 }
 
 .card {
-  border-radius: 16px;
+    border: none !important;
+    border-radius: 12px !important;
 }
 
+.card-body h5 {
+    font-weight: 600;
+}
+
+.table td, .table th {
+    vertical-align: middle;
+}
+
+/* ============================
+   BADGES
+============================ */
+
 .badge {
-  text-transform: uppercase;
-  font-size: 0.7rem;
+    font-size: 0.9rem;
+    padding: 6px 10px;
+    border-radius: 6px;
+}
+
+/* Status ranglari */
+
+.badge-NEW {
+    background: #6c757d;
+}
+
+.badge-PENDING {
+    background: #ffc107;
+    color: black;
+}
+
+.badge-IN_PROGRESS {
+    background: #0d6efd;
+}
+
+.badge-DONE {
+    background: #198754;
+}
+
+.badge-PAYMENT_PENDING {
+    background: #fd7e14;
+}
+
+.badge-CLOSED {
+    background: #dc3545;
+}
+
+/* ============================
+   CHAT BOX
+============================ */
+
+.chat-msg-admin {
+    background: #000;
+    color: #fff;
+    border-radius: 10px;
+    padding: 10px 14px;
+}
+
+.chat-msg-user {
+    background: #e9ecef;
+    border-radius: 10px;
+    padding: 10px 14px;
+}
+
+/* Scroll */
+.chat-container {
+    max-height: 300px;
+    overflow-y: auto;
+    padding-right: 10px;
+}
+
+/* ============================
+   BUTTONS
+============================ */
+
+.btn-dark {
+    border-radius: 8px !important;
+    padding: 8px 14px !important;
+}
+
+.btn-primary,
+.btn-warning {
+    border-radius: 8px !important;
+    padding: 8px 14px !important;
+}
+
+/* ============================
+   FORMS
+============================ */
+
+input.form-control,
+select.form-select,
+textarea.form-control {
+    border-radius: 10px !important;
+    padding: 10px 14px !important;
+}
+
+/* ============================
+   TABLE
+============================ */
+
+.table {
+    border-radius: 12px;
+    overflow: hidden;
+    background: white;
+}
+
+.table thead {
+    background: #222;
+    color: #fff;
+}
+
+.table tbody tr:hover {
+    background: #f1f1f1;
+}
+
+/* ============================
+   MODAL
+============================ */
+
+.modal-content {
+    border-radius: 15px !important;
+}
+
+.modal-header {
+    background: #222;
+    color: white;
+    border-top-left-radius: 15px;
+    border-top-right-radius: 15px;
+}
+
+/* ============================
+   RESPONSIVE
+============================ */
+
+@media (max-width: 768px) {
+    .card-body {
+        padding: 15px;
+    }
 }
