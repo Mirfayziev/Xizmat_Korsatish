@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3 class="mb-4">🤖 AI Tahlillar</h3>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+
+        {% if ai_list %}
+        <table class="table">
+            <thead>
+            <tr>
+                <th>ID</th>
+                <th>Buyurtma</th>
+                <th>Audio turi</th>
+                <th>Sentiment</th>
+                <th>Sifat</th>
+                <th>Qiyinchilik</th>
+                <th>Sana</th>
+                <th></th>
+            </tr>
+            </thead>
+
+            <tbody>
+            {% for ai in ai_list %}
+            <tr>
+                <td>{{ ai.id }}</td>
+                <td>#{{ ai.order_id }}</td>
+
+                <td>
+                    {% if ai.audio_type == "client" %}
+                        🎧 Mijoz
+                    {% else %}
+                        🧑‍🔧 Usta
+                    {% endif %}
+                </td>
+
+                <td>{{ ai.sentiment_score }}/100</td>
+                <td>{{ ai.quality_score }}/100</td>
+
+                <td>
+                    {% if ai.audio_type == "master" %}
+                        {{ ai.difficulty }}/10
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+
+                <td>{{ ai.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+
+                <td>
+                    <button class="btn btn-sm btn-dark" data-bs-toggle="modal"
+                            data-bs-target="#aiModal{{ ai.id }}">
+                        Ko‘rish
+                    </button>
+                </td>
+            </tr>
+
+
+            <!-- MODAL – AI DETAIL -->
+            <div class="modal fade" id="aiModal{{ ai.id }}">
+                <div class="modal-dialog modal-lg">
+
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">
+                                AI Tahlil (#{{ ai.id }}, Buyurtma #{{ ai.order_id }})
+                            </h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+
+                        <div class="modal-body">
+
+                            <p><b>Audio turi:</b> {{ ai.audio_type }}</p>
+
+                            <p><b>Transcript:</b><br> {{ ai.transcript }}</p>
+
+                            <p><b>AI xulosa:</b><br> {{ ai.ai_summary }}</p>
+
+                            <p><b>Sentiment:</b> {{ ai.sentiment_score }}/100</p>
+                            <p><b>Sifat:</b> {{ ai.quality_score }}/100</p>
+
+                            {% if ai.audio_type == "master" %}
+                            <p><b>Qiyinchilik darajasi:</b> {{ ai.difficulty }}/10</p>
+                            <p><b>Materiallar:</b> {{ ai.materials_used }}</p>
+                            <p><b>Qo‘shimcha xarajat:</b> {{ ai.extra_cost }}</p>
+                            {% endif %}
+
+                            <p><b>Tavsiyalar:</b><br> {{ ai.recommended }}</p>
+
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+            </tbody>
+
+        </table>
+
+        {% else %}
+            <p class="text-muted">Hozircha AI tahlillar mavjud emas.</p>
+        {% endif %}
+
+    </div>
+</div>
+
+{% endblock %}
