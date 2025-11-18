@@ -244,8 +244,7 @@ def create_app():
 
                 # If job done -> notify user payment pending
                 if order.status == OrderStatus.DONE or order.status == OrderStatus.PAYMENT_PENDING:
-                    text = "✅ Ish bajarildi.
-💳 To'lov kutilmoqda."
+                    text = "✅ Ish bajarildi.\n💳 To'lov kutilmoqda."
                     send_telegram_message(order.chat_id, text)
 
             if action == "send_message":
