@@ -1,79 +1,168 @@
 {% extends "base.html" %}
 {% block content %}
-<h3>Buyurtma #{{ order.id }}</h3>
+
+<h3 class="mb-4">📝 Buyurtma #{{ order.id }}</h3>
 
 <div class="row">
-  <div class="col-md-6">
-    <div class="card shadow-sm mb-3">
-      <div class="card-body">
-        <h5 class="card-title">Buyurtma ma'lumotlari</h5>
-        <p><strong>Xizmat:</strong> {{ order.service.name if order.service else '-' }}</p>
-        <p><strong>Kategoriya:</strong> {{ order.category.name if order.category else '-' }}</p>
-        <p><strong>Telefon:</strong> {{ order.phone or '-' }}</p>
-        <p><strong>To'lov turi:</strong> {{ order.payment_method or '-' }}</p>
-        <p><strong>Izoh:</strong><br>{{ order.comment or '-' }}</p>
-        <p><strong>Lokatsiya:</strong>
-          {% if order.location_lat and order.location_lng %}
-            <a href="https://maps.google.com/?q={{ order.location_lat }},{{ order.location_lng }}" target="_blank">Google Map</a>
-          {% elif order.address_text %}
-            {{ order.address_text }}
-          {% else %}
-            -
-          {% endif %}
-        </p>
-        <p><strong>Status:</strong> <span class="badge bg-secondary">{{ order.status.value }}</span></p>
 
-        <form method="post" class="row g-2 mt-2">
-          <input type="hidden" name="action" value="set_status">
-          <div class="col-8">
-            <select name="status" class="form-select">
-              {% for st in OrderStatus %}
-              <option value="{{ st.value }}" {% if order.status == st %}selected{% endif %}>{{ st.value }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="col-4">
-            <button class="btn btn-primary w-100">Statusni yangilash</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </div>
+    <!-- LEFT SIDE — ORDER INFO -->
+    <div class="col-md-6">
 
-  <div class="col-md-6">
-    <div class="card shadow-sm mb-3">
-      <div class="card-body">
-        <h5 class="card-title">Chat (Admin ↔ Foydalanuvchi)</h5>
-        <div class="chat-box mb-3" style="max-height: 300px; overflow-y: auto; border: 1px solid #eee; padding: 10px; border-radius: 6px;">
-          {% for m in messages %}
-            <div class="mb-2">
-              {% if m.from_admin %}
-                <div class="text-end">
-                  <span class="badge bg-primary">Admin</span>
-                  <div class="d-inline-block bg-primary text-white px-2 py-1 rounded-3 mt-1">{{ m.text }}</div>
-                </div>
-              {% else %}
-                <div class="text-start">
-                  <span class="badge bg-secondary">Foydalanuvchi</span>
-                  <div class="d-inline-block bg-light px-2 py-1 rounded-3 mt-1">{{ m.text }}</div>
-                </div>
-              {% endif %}
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+
+                <h5 class="mb-3">📌 Buyurtma ma’lumotlari</h5>
+
+                <p><b>Kategoriya:</b> {{ order.category.name if order.category else "-" }}</p>
+                <p><b>Xizmat:</b> {{ order.service.name if order.service else "-" }}</p>
+                <p><b>Narx:</b> {{ order.service.price if order.service else "" }} so‘m</p>
+                <p><b>Mijoz raqami:</b> {{ order.phone }}</p>
+
+                <p><b>Izoh:</b><br> {{ order.comment }}</p>
+
+                <p><b>To‘lov:</b> {{ order.payment_method }}</p>
+
+                <p><b>Joylashuv:</b><br>
+                    {% if order.location_lat %}
+                    <a target="_blank"
+                       href="https://www.google.com/maps?q={{ order.location_lat }},{{ order.location_lng }}">
+                        📍 Google Maps’da ochish
+                    </a>
+                    {% else %}
+                    <i>Lokatsiya yo‘q</i>
+                    {% endif %}
+                </p>
+
+                <p><b>Status:</b>
+                    <span class="badge bg-dark">{{ order.status.value }}</span>
+                </p>
+
+                <!-- STATUS FORM -->
+                <form method="POST" class="mt-3">
+                    <input type="hidden" name="action" value="status">
+
+                    <div class="row">
+                        <div class="col-md-8">
+                            <select name="status" class="form-select">
+                                {% for s in OrderStatus %}
+                                <option value="{{ s.value }}"
+                                    {% if order.status == s %}selected{% endif %}>
+                                    {{ s.value }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="col-md-4">
+                            <button class="btn btn-dark w-100">O‘zgartirish</button>
+                        </div>
+                    </div>
+                </form>
+
             </div>
-          {% endfor %}
-          {% if not messages %}
-            <p class="text-muted mb-0">Hozircha xabarlar yo'q.</p>
-          {% endif %}
         </div>
 
-        <form method="post">
-          <input type="hidden" name="action" value="send_message">
-          <div class="mb-2">
-            <textarea name="text" class="form-control" rows="2" placeholder="Javob yozing..." required></textarea>
-          </div>
-          <button class="btn btn-success">Yuborish</button>
-        </form>
-      </div>
+
+        <!-- CHAT BOX -->
+        <div class="card shadow-sm">
+            <div class="card-body">
+
+                <h5 class="mb-3">💬 Muloqot (Admin ↔ Mijoz)</h5>
+
+                <div style="max-height: 300px; overflow-y: auto; padding-right: 10px;">
+                    {% for m in messages %}
+                    <div class="mb-3 p-2 {% if m.from_admin %}bg-dark text-white{% else %}bg-light{% endif %}"
+                         style="border-radius: 8px;">
+                        <small>
+                            {% if m.from_admin %}Admin:{% else %}Mijoz:{% endif %}
+                        </small><br>
+                        {{ m.text }}
+                        <div><small class="text-secondary">{{ m.created_at }}</small></div>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <form method="POST" class="mt-3">
+                    <input type="hidden" name="action" value="send_message">
+                    <textarea name="text" class="form-control mb-2" placeholder="Xabar yuborish..." required></textarea>
+                    <button class="btn btn-dark w-100">Yuborish</button>
+                </form>
+
+            </div>
+        </div>
+
     </div>
-  </div>
+
+
+
+
+    <!-- RIGHT SIDE — AI ANALYSIS -->
+    <div class="col-md-6">
+
+        <!-- UPLOAD AUDIO -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+
+                <h5 class="mb-3">🤖 AI Audio Tahlil</h5>
+
+                <form method="POST"
+                      action="/admin/upload_audio/{{ order.id }}/client"
+                      enctype="multipart/form-data"
+                      class="mb-3">
+
+                    <label class="form-label">🎧 Mijoz audiosi (review)</label>
+                    <input type="file" name="audio" class="form-control mb-2" required>
+                    <button class="btn btn-primary w-100">AI tahlil qil (Mijoz)</button>
+                </form>
+
+                <form method="POST"
+                      action="/admin/upload_audio/{{ order.id }}/master"
+                      enctype="multipart/form-data">
+
+                    <label class="form-label">🧑‍🔧 Usta audiosi (hisobot)</label>
+                    <input type="file" name="audio" class="form-control mb-2" required>
+                    <button class="btn btn-warning w-100">AI tahlil qil (Usta)</button>
+                </form>
+
+            </div>
+        </div>
+
+
+        <!-- AI RESULTS LIST -->
+        <div class="card shadow-sm">
+            <div class="card-body">
+
+                <h5 class="mb-3">📈 AI natijalari</h5>
+
+                {% if ai_data %}
+                    {% for ai in ai_data %}
+                    <div class="mb-3 p-3 bg-light" style="border-radius:8px;">
+
+                        <p><b>Audio turi:</b> {{ ai.audio_type }}</p>
+                        <p><b>Transcript:</b><br> {{ ai.transcript }}</p>
+                        <p><b>AI Xulosa:</b><br> {{ ai.ai_summary }}</p>
+                        <p><b>Sentiment:</b> {{ ai.sentiment_score }}/100</p>
+                        <p><b>Sifat:</b> {{ ai.quality_score }}/100</p>
+
+                        {% if ai.audio_type == "master" %}
+                        <p><b>Qiyinchilik:</b> {{ ai.difficulty }}/10</p>
+                        <p><b>Materiallar:</b> {{ ai.materials_used }}</p>
+                        <p><b>Qo‘shimcha xarajat:</b> {{ ai.extra_cost }}</p>
+                        {% endif %}
+
+                        <p><b>Tavsiyalar:</b><br> {{ ai.recommended }}</p>
+
+                        <small class="text-secondary">{{ ai.created_at }}</small>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <i>AI hali tahlil qilmagan.</i>
+                {% endif %}
+
+            </div>
+        </div>
+
+    </div>
 </div>
+
 {% endblock %}
