@@ -1,77 +1,73 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h3>Xizmat turlari</h3>
-</div>
 
-<div class="row mb-4">
-  <div class="col-md-8">
-    <div class="card shadow-sm">
-      <div class="card-body">
-        <h5 class="card-title">Yangi xizmat qo'shish</h5>
-        <form method="post" action="{{ url_for('admin_add_service') }}">
-          <div class="mb-3">
-            <label class="form-label">Xizmat nomi</label>
-            <input type="text" name="name" class="form-control" required placeholder="Masalan, Rozetka almashtirish">
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Narx (ixtiyoriy)</label>
-            <input type="number" step="0.01" name="price" class="form-control" placeholder="100000">
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Kategoriya</label>
-            <select name="category_id" class="form-select" required>
-              <option value="">Tanlang...</option>
-              {% for c in categories %}
-              <option value="{{ c.id }}">{{ c.icon }} {{ c.name }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Tavsif (ixtiyoriy)</label>
-            <textarea name="description" class="form-control" rows="3"></textarea>
-          </div>
-          <button type="submit" class="btn btn-primary">Saqlash</button>
+<h3 class="mb-4">🛠 Xizmatlar</h3>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+
+        <form method="POST" action="/admin/services/add">
+            <div class="row">
+
+                <div class="col-md-3">
+                    <input name="name" class="form-control" placeholder="Xizmat nomi" required>
+                </div>
+
+                <div class="col-md-2">
+                    <input name="price" class="form-control" placeholder="Narx">
+                </div>
+
+                <div class="col-md-3">
+                    <select name="category_id" class="form-control" required>
+                        <option value="">Kategoriya</option>
+                        {% for c in categories %}
+                        <option value="{{ c.id }}">{{ c.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-md-3">
+                    <input name="description" class="form-control" placeholder="Izoh">
+                </div>
+
+                <div class="col-md-1">
+                    <button class="btn btn-dark w-100">+</button>
+                </div>
+
+            </div>
         </form>
-      </div>
+
     </div>
-  </div>
 </div>
 
 <div class="card shadow-sm">
-  <div class="card-body table-responsive">
-    <table class="table align-middle">
-      <thead>
-      <tr>
-        <th>#</th>
-        <th>Nomi</th>
-        <th>Kategoriya</th>
-        <th>Narx</th>
-        <th></th>
-      </tr>
-      </thead>
-      <tbody>
-      {% for s in services %}
-      <tr>
-        <td>{{ s.id }}</td>
-        <td>{{ s.name }}</td>
-        <td>{{ s.category.icon }} {{ s.category.name }}</td>
-        <td>
-          {% if s.price is not none %}
-            {{ "%.0f"|format(s.price) }}
-          {% else %}
-            -
-          {% endif %}
-        </td>
-        <td>
-          <form method="post" action="{{ url_for('admin_delete_service', srv_id=s.id) }}" onsubmit="return confirm('O‘chirasizmi?');">
-            <button class="btn btn-sm btn-outline-danger">O'chirish</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
+    <div class="card-body">
+
+        <table class="table">
+            <tr>
+                <th>ID</th>
+                <th>Nomi</th>
+                <th>Narx</th>
+                <th>Kategoriya</th>
+                <th></th>
+            </tr>
+
+            {% for s in services %}
+            <tr>
+                <td>{{ s.id }}</td>
+                <td>{{ s.name }}</td>
+                <td>{{ s.price }} so‘m</td>
+                <td>{{ s.category.name }}</td>
+                <td>
+                    <form method="POST" action="/admin/services/{{ s.id }}/delete">
+                        <button class="btn btn-sm btn-danger">O‘chirish</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+
+    </div>
 </div>
+
 {% endblock %}
