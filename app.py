@@ -2,10 +2,22 @@ import os
 import requests
 from functools import wraps
 
-from flask import Flask, request, render_template, redirect, url_for, session, flash, jsonify
+from flask import (
+    Flask,
+    request,
+    render_template,
+    redirect,
+    url_for,
+    session,
+    flash,
+    jsonify,
+)
+
+from sqlalchemy import func
 
 from config import Config
 from models import db, Category, Service, Order, Message, OrderStatus
+
 
 def create_app():
     app = Flask(__name__)
@@ -18,6 +30,7 @@ def create_app():
     # --------------- Helpers ---------------
 
     def send_telegram_message(chat_id, text, reply_markup=None):
+        """Bot orqali xabar yuborish."""
         token = app.config["TELEGRAM_BOT_TOKEN"]
         if not token or not chat_id:
             return
@@ -34,34 +47,55 @@ def create_app():
         except Exception as e:
             print("Error sending telegram message:", e)
 
+        return
+
     def build_categories_keyboard():
-        keyboard = []
         categories = Category.query.order_by(Category.id).all()
+        keyboard = []
         row = []
         for i, cat in enumerate(categories, start=1):
             text = f"{cat.icon} {cat.name}" if cat.icon else cat.name
-            row.append({
-                "text": text,
-                "callback_data": f"cat_{cat.id}",
-            })
+            row.append(
+                {
+                    "text": text,
+                    "callback_data": f"cat_{cat.id}",
+                }
+            )
             if i % 2 == 0:
                 keyboard.append(row)
                 row = []
         if row:
             keyboard.append(row)
+
+        # Admin bilan bog'lanish tugmasi
+        keyboard.append(
+            [
+                {
+                    "text": "📞 Admin bilan bog'lanish",
+                    "callback_data": "contact_admin",
+                }
+            ]
+        )
+
         return {"inline_keyboard": keyboard} if keyboard else None
 
     def build_services_keyboard(category_id):
-        services = Service.query.filter_by(category_id=category_id).order_by(Service.id).all()
+        services = (
+            Service.query.filter_by(category_id=category_id)
+            .order_by(Service.id)
+            .all()
+        )
         keyboard = []
         row = []
         for i, srv in enumerate(services, start=1):
             price_txt = f" ({srv.price:.0f})" if srv.price is not None else ""
             text = f"{srv.name}{price_txt}"
-            row.append({
-                "text": text,
-                "callback_data": f"srv_{srv.id}",
-            })
+            row.append(
+                {
+                    "text": text,
+                    "callback_data": f"srv_{srv.id}",
+                }
+            )
             if i % 1 == 0:
                 keyboard.append(row)
                 row = []
@@ -84,14 +118,28 @@ def create_app():
 
     def build_share_contact_keyboard():
         return {
-            "keyboard": [[{"text": "📱 Telefon raqamni ulashish", "request_contact": True}]],
+            "keyboard": [
+                [
+                    {
+                        "text": "📱 Telefon raqamni ulashish",
+                        "request_contact": True,
+                    }
+                ]
+            ],
             "resize_keyboard": True,
             "one_time_keyboard": True,
         }
 
     def build_share_location_keyboard():
         return {
-            "keyboard": [[{"text": "📍 Lokatsiyani ulashish", "request_location": True}]],
+            "keyboard": [
+                [
+                    {
+                        "text": "📍 Lokatsiyani ulashish",
+                        "request_location": True,
+                    }
+                ]
+            ],
             "resize_keyboard": True,
             "one_time_keyboard": True,
         }
@@ -102,7 +150,12 @@ def create_app():
                 Order.user_id == user_id,
                 Order.chat_id == chat_id,
                 Order.status.in_(
-                    [OrderStatus.NEW, OrderStatus.PENDING, OrderStatus.IN_PROGRESS, OrderStatus.PAYMENT_PENDING]
+                    [
+                        OrderStatus.NEW,
+                        OrderStatus.PENDING,
+                        OrderStatus.IN_PROGRESS,
+                        OrderStatus.PAYMENT_PENDING,
+                    ]
                 ),
             )
             .order_by(Order.id.desc())
@@ -122,6 +175,7 @@ def create_app():
             if not session.get("admin_logged_in"):
                 return redirect(url_for("admin_login"))
             return f(*args, **kwargs)
+
         return decorated
 
     # --------------- Admin routes ---------------
@@ -131,7 +185,10 @@ def create_app():
         if request.method == "POST":
             username = request.form.get("username")
             password = request.form.get("password")
-            if username == app.config["ADMIN_USERNAME"] and password == app.config["ADMIN_PASSWORD"]:
+            if (
+                username == app.config["ADMIN_USERNAME"]
+                and password == app.config["ADMIN_PASSWORD"]
+            ):
                 session["admin_logged_in"] = True
                 return redirect(url_for("admin_dashboard"))
             else:
@@ -153,7 +210,9 @@ def create_app():
     @login_required
     def admin_dashboard():
         orders = Order.query.order_by(Order.created_at.desc()).limit(20).all()
-        return render_template("dashboard.html", orders=orders, OrderStatus=OrderStatus)
+        return render_template(
+            "dashboard.html", orders=orders, OrderStatus=OrderStatus
+        )
 
     @app.route("/admin/categories")
     @login_required
@@ -185,7 +244,11 @@ def create_app():
     def admin_services():
         services = Service.query.order_by(Service.id).all()
         categories = Category.query.order_by(Category.id).all()
-        return render_template("services.html", services=services, categories=categories)
+        return render_template(
+            "services.html",
+            services=services,
+            categories=categories,
+        )
 
     @app.route("/admin/services/add", methods=["POST"])
     @login_required
@@ -226,7 +289,12 @@ def create_app():
             except ValueError:
                 pass
         orders = query.order_by(Order.created_at.desc()).all()
-        return render_template("orders.html", orders=orders, OrderStatus=OrderStatus, status_filter=status_filter)
+        return render_template(
+            "orders.html",
+            orders=orders,
+            OrderStatus=OrderStatus,
+            status_filter=status_filter,
+        )
 
     @app.route("/admin/orders/<int:order_id>", methods=["GET", "POST"])
     @login_required
@@ -234,6 +302,7 @@ def create_app():
         order = Order.query.get_or_404(order_id)
         if request.method == "POST":
             action = request.form.get("action")
+
             if action == "set_status":
                 new_status = request.form.get("status")
                 try:
@@ -242,10 +311,24 @@ def create_app():
                 except ValueError:
                     pass
 
-                # If job done -> notify user payment pending
-                if order.status == OrderStatus.DONE or order.status == OrderStatus.PAYMENT_PENDING:
-                    text = "✅ Ish bajarildi.\n💳 To'lov kutilmoqda."
+                # Ish bajarilganda foydalanuvchiga xabar
+                if order.status in [
+                    OrderStatus.DONE,
+                    OrderStatus.PAYMENT_PENDING,
+                ]:
+                    text = (
+                        "✅ Ish bajarildi.\n"
+                        "💳 To'lov kutilmoqda."
+                    )
                     send_telegram_message(order.chat_id, text)
+
+                # Admin o'zi ham xabardor bo'lishi uchun
+                admin_chat_id = app.config.get("TELEGRAM_ADMIN_CHAT_ID")
+                if admin_chat_id:
+                    send_telegram_message(
+                        admin_chat_id,
+                        f"ℹ️ Buyurtma #{order.id} statusi yangilandi: {order.status.value}",
+                    )
 
             if action == "send_message":
                 text = request.form.get("text")
@@ -254,12 +337,93 @@ def create_app():
                     db.session.add(msg)
                     db.session.commit()
                     # send to user in Telegram chat
-                    send_telegram_message(order.chat_id, f"👨‍💼 Admin: {text}")
+                    send_telegram_message(
+                        order.chat_id,
+                        f"👨‍💼 Admin: {text}",
+                    )
 
             return redirect(url_for("admin_order_detail", order_id=order.id))
 
-        messages = Message.query.filter_by(order_id=order.id).order_by(Message.created_at.asc()).all()
-        return render_template("order_detail.html", order=order, messages=messages, OrderStatus=OrderStatus)
+        messages = (
+            Message.query.filter_by(order_id=order.id)
+            .order_by(Message.created_at.asc())
+            .all()
+        )
+        return render_template(
+            "order_detail.html",
+            order=order,
+            messages=messages,
+            OrderStatus=OrderStatus,
+        )
+
+    # --------------- ANALYTICS ---------------
+
+    @app.route("/admin/analytics")
+    @login_required
+    def admin_analytics():
+        # Umumiy statistika
+        total_orders = Order.query.count()
+        total_done = (
+            Order.query.filter(
+                Order.status.in_(
+                    [
+                        OrderStatus.DONE,
+                        OrderStatus.PAYMENT_PENDING,
+                        OrderStatus.CLOSED,
+                    ]
+                )
+            ).count()
+        )
+        total_in_progress = (
+            Order.query.filter(Order.status == OrderStatus.IN_PROGRESS).count()
+        )
+
+        # Xizmatlar bo'yicha buyurtmalar
+        services_stats = (
+            db.session.query(Service.name, func.count(Order.id))
+            .join(Order, Order.service_id == Service.id)
+            .group_by(Service.id)
+            .order_by(func.count(Order.id).desc())
+            .all()
+        )
+
+        # Kategoriya bo'yicha buyurtmalar
+        categories_stats = (
+            db.session.query(Category.name, func.count(Order.id))
+            .join(Order, Order.category_id == Category.id)
+            .group_by(Category.id)
+            .order_by(func.count(Order.id).desc())
+            .all()
+        )
+
+        # To'lov turlari bo'yicha
+        payment_stats = (
+            db.session.query(Order.payment_method, func.count(Order.id))
+            .group_by(Order.payment_method)
+            .all()
+        )
+
+        # Kunlik buyurtmalar
+        daily_stats = (
+            db.session.query(
+                func.date(Order.created_at),
+                func.count(Order.id),
+            )
+            .group_by(func.date(Order.created_at))
+            .order_by(func.date(Order.created_at))
+            .all()
+        )
+
+        return render_template(
+            "analytics.html",
+            total_orders=total_orders,
+            total_done=total_done,
+            total_in_progress=total_in_progress,
+            services_stats=services_stats,
+            categories_stats=categories_stats,
+            payment_stats=payment_stats,
+            daily_stats=daily_stats,
+        )
 
     # --------------- Telegram Webhook ---------------
 
@@ -281,6 +445,7 @@ def create_app():
 
             order = get_or_create_active_order(user_id, chat_id)
 
+            # START
             if text == "/start":
                 order.step = "category"
                 order.status = OrderStatus.NEW
@@ -290,10 +455,28 @@ def create_app():
                     "Xizmat turini tanlang:"
                 )
                 reply_markup = build_categories_keyboard()
-                send_telegram_message(chat_id, welcome_text, reply_markup=reply_markup)
+                send_telegram_message(
+                    chat_id,
+                    welcome_text,
+                    reply_markup=reply_markup,
+                )
                 return
 
-            # if conversation step
+            # Admin bilan chatda bo'lsa
+            if order.step == "chat" and text:
+                msg = Message(order_id=order.id, from_admin=False, text=text)
+                db.session.add(msg)
+                db.session.commit()
+
+                admin_chat_id = app.config.get("TELEGRAM_ADMIN_CHAT_ID")
+                if admin_chat_id:
+                    send_telegram_message(
+                        admin_chat_id,
+                        f"💬 Yangi xabar (Order #{order.id}):\n{text}",
+                    )
+                return
+
+            # Telefon bosqichi
             if order.step == "phone":
                 if contact and contact.get("phone_number"):
                     order.phone = contact["phone_number"]
@@ -303,41 +486,54 @@ def create_app():
                 db.session.commit()
                 send_telegram_message(
                     chat_id,
-                    "📍 Lokatsiyani yuboring (Share Location tugmasidan foydalanib).",
+                    "📍 Lokatsiyani yuboring (Share Location tugmasidan foydalanib) yoki manzilni matn ko'rinishida yozing.",
                     reply_markup=build_share_location_keyboard(),
                 )
                 return
 
+            # Lokatsiya bosqichi
             if order.step == "location":
                 if location:
                     order.location_lat = location.get("latitude")
                     order.location_lng = location.get("longitude")
                     order.step = "comment"
                     db.session.commit()
-                    send_telegram_message(chat_id, "✍️ Usta o'zi bilan nima olib kelishi kerak? Izoh qoldiring:")
+                    send_telegram_message(
+                        chat_id,
+                        "✍️ Usta o'zi bilan nima olib kelishi kerak? Izoh qoldiring:",
+                        reply_markup={"remove_keyboard": True},
+                    )
                     return
                 elif text:
                     order.address_text = text
                     order.step = "comment"
                     db.session.commit()
-                    send_telegram_message(chat_id, "✍️ Usta o'zi bilan nima olib kelishi kerak? Izoh qoldiring:")
+                    send_telegram_message(
+                        chat_id,
+                        "✍️ Usta o'zi bilan nima olib kelishi kerak? Izoh qoldiring:",
+                        reply_markup={"remove_keyboard": True},
+                    )
                     return
 
+            # Izoh bosqichi
             if order.step == "comment":
                 if text:
                     order.comment = text
                     order.step = "payment"
                     db.session.commit()
-                    send_telegram_message(chat_id, "💳 To'lov turini tanlang:", reply_markup=build_payment_keyboard())
+                    send_telegram_message(
+                        chat_id,
+                        "💳 To'lov turini tanlang:",
+                        reply_markup=build_payment_keyboard(),
+                    )
                     return
 
-            # User free-text message -> treat as chat msg
+            # Agar alohida step bo'lmasa – oddiy chat sifatida saqlaymiz
             if text:
                 msg = Message(order_id=order.id, from_admin=False, text=text)
                 db.session.add(msg)
                 db.session.commit()
 
-                # notify admin (optional)
                 admin_chat_id = app.config.get("TELEGRAM_ADMIN_CHAT_ID")
                 if admin_chat_id:
                     send_telegram_message(
@@ -354,6 +550,34 @@ def create_app():
 
             order = get_or_create_active_order(user_id, chat_id)
 
+            # Admin bilan bog'lanish
+            if data == "contact_admin":
+                order.step = "chat"
+                db.session.commit()
+                admin_chat_id = app.config.get("TELEGRAM_ADMIN_CHAT_ID")
+                if admin_chat_id:
+                    send_telegram_message(
+                        admin_chat_id,
+                        f"📞 Foydalanuvchi siz bilan bog'lanmoqchi. Order #{order.id}",
+                    )
+                send_telegram_message(
+                    chat_id,
+                    "✍️ Xabaringizni yozing. Admin sizga javob qaytaradi.",
+                )
+                return
+
+            # Orqaga menyuga qaytish (istasa keyin qo'shishimiz mumkin)
+            if data == "back_to_menu":
+                order.step = "category"
+                db.session.commit()
+                send_telegram_message(
+                    chat_id,
+                    "Xizmat turini tanlang:",
+                    reply_markup=build_categories_keyboard(),
+                )
+                return
+
+            # Kategoriya tanlash
             if data.startswith("cat_"):
                 cat_id = int(data.split("_")[1])
                 category = Category.query.get(cat_id)
@@ -366,12 +590,23 @@ def create_app():
 
                 services_keyboard = build_services_keyboard(cat_id)
                 if not services_keyboard:
-                    send_telegram_message(chat_id, "Bu kategoriyada xizmatlar topilmadi.")
+                    send_telegram_message(
+                        chat_id,
+                        "Bu kategoriyada xizmatlar topilmadi.",
+                    )
                     return
-                text = f"{category.icon or ''} <b>{category.name}</b> kategoriyasi.\nXizmat turini tanlang:"
-                send_telegram_message(chat_id, text, reply_markup=services_keyboard)
+                text = (
+                    f"{category.icon or ''} <b>{category.name}</b> kategoriyasi.\n"
+                    "Xizmat turini tanlang:"
+                )
+                send_telegram_message(
+                    chat_id,
+                    text,
+                    reply_markup=services_keyboard,
+                )
                 return
 
+            # Xizmat tanlash
             if data.startswith("srv_"):
                 srv_id = int(data.split("_")[1])
                 service = Service.query.get(srv_id)
@@ -389,9 +624,14 @@ def create_app():
                 if service.description:
                     summary += f"\n{service.description}\n"
                 summary += "\n📱 Telefon raqamingizni yuboring:"
-                send_telegram_message(chat_id, summary, reply_markup=build_share_contact_keyboard())
+                send_telegram_message(
+                    chat_id,
+                    summary,
+                    reply_markup=build_share_contact_keyboard(),
+                )
                 return
 
+            # To'lov tanlash
             if data.startswith("pay_"):
                 pay_code = data.split("_")[1]
                 mapping = {
@@ -405,6 +645,13 @@ def create_app():
                 order.step = "done"
                 db.session.commit()
 
+                # Lokatsiya / kontakt keyboardlarini yopamiz
+                send_telegram_message(
+                    chat_id,
+                    "🎉 Buyurtmangiz qabul qilindi!",
+                    reply_markup={"remove_keyboard": True},
+                )
+
                 text_lines = [
                     "✅ Buyurtmangiz qabul qilindi!",
                     "",
@@ -412,21 +659,28 @@ def create_app():
                 if order.service:
                     text_lines.append(f"Xizmat: {order.service.name}")
                 if order.payment_method:
-                    text_lines.append(f"To'lov turi: {order.payment_method}")
+                    text_lines.append(
+                        f"To'lov turi: {order.payment_method}"
+                    )
                 text_lines.append("")
-                text_lines.append("Usta tez orada siz bilan bog'lanadi yoki keladi.")
+                text_lines.append(
+                    "Usta tez orada siz bilan bog'lanadi yoki keladi."
+                )
                 send_telegram_message(chat_id, "\n".join(text_lines))
 
-                # notify admin
+                # Adminga ham xabar
                 admin_chat_id = app.config.get("TELEGRAM_ADMIN_CHAT_ID")
                 if admin_chat_id:
                     send_telegram_message(
                         admin_chat_id,
-                        f"🆕 Yangi buyurtma #{order.id}\nXizmat: {order.service.name if order.service else ''}",
+                        f"🆕 Yangi buyurtma #{order.id}\n"
+                        f"Xizmat: {order.service.name if order.service else ''}\n"
+                        f"To'lov: {order.payment_method or '-'}",
                     )
                 return
 
     return app
+
 
 app = create_app()
 
