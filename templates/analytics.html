@@ -3,7 +3,7 @@
 <h3 class="mb-3">Analitika</h3>
 
 <div class="row mb-4">
-  <div class="col-md-4">
+  <div class="col-md-3">
     <div class="card shadow-sm">
       <div class="card-body text-center">
         <h6 class="text-muted">Umumiy buyurtmalar</h6>
@@ -11,7 +11,7 @@
       </div>
     </div>
   </div>
-  <div class="col-md-4">
+  <div class="col-md-3">
     <div class="card shadow-sm">
       <div class="card-body text-center">
         <h6 class="text-muted">Yakunlangan / to'lov kutilayotgan</h6>
@@ -19,7 +19,7 @@
       </div>
     </div>
   </div>
-  <div class="col-md-4">
+  <div class="col-md-3">
     <div class="card shadow-sm">
       <div class="card-body text-center">
         <h6 class="text-muted">Jarayonda (IN_PROGRESS)</h6>
@@ -27,7 +27,21 @@
       </div>
     </div>
   </div>
+  <div class="col-md-3">
+    <div class="card shadow-sm">
+      <div class="card-body text-center">
+        <h6 class="text-muted">Usta ulushi: {{ master_percent }}%</h6>
+        <p class="mb-1 text-muted">Umumiy daromad</p>
+        <h5>{{ "%.0f"|format(total_revenue) }}</h5>
+        <p class="mb-1 text-muted mt-2">Ustalar xarajati</p>
+        <h6 class="text-danger">{{ "%.0f"|format(total_master_cost) }}</h6>
+        <p class="mb-1 text-muted mt-2">Sof foyda</p>
+        <h5 class="text-success">{{ "%.0f"|format(total_profit) }}</h5>
+      </div>
+    </div>
+  </div>
 </div>
+
 
 <div class="row mb-4">
   <div class="col-md-6">
